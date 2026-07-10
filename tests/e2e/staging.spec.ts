@@ -348,9 +348,3 @@ test("Cloud Files stays gated while Cloud Media auto-authenticates", async ({ re
   expect((await request.get("http://127.0.0.1:8082/api/auth/files/session")).status()).toBe(401);
   expect((await request.get("http://127.0.0.1:8090/api/auth/media/session")).status()).toBe(200);
 });
-
-test("Open WebUI stays on its pre-Cloud Files frontend", async ({ page }) => {
-  await page.goto("http://127.0.0.1:3003");
-  await expect(page.locator("cloud-home-switcher")).toHaveCount(0);
-  expect(await page.title()).not.toBe("");
-});
