@@ -1,0 +1,49 @@
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: deploy/gateway.Dockerfile
+    container_name: cloud-home-gateway
+    restart: unless-stopped
+    env_file: runtime/.env
+    network_mode: host
+    volumes:
+      - ./runtime/data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8079/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  media:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+      args:
+        APP: media
+    container_name: cloud-home-media
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8090:80"
+
+  files:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+      args:
+        APP: files
+    container_name: cloud-home-files
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8082:80"

@@ -1,0 +1,198 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap');
+
+:root {
+  --bc-bg: #050505;
+  --bc-surface: #0c0c0e;
+  --bc-raised: #141417;
+  --bc-hover: #1a1a1e;
+  --bc-text: #f5f5f7;
+  --bc-muted: #86868f;
+  --bc-line: rgba(255, 255, 255, 0.085);
+  --bc-line-strong: rgba(255, 255, 255, 0.15);
+  --bc-green: #a6e22e;
+  --bc-pink: #f92672;
+  --bc-orange: #fd971f;
+  --bc-violet: #ae81ff;
+  --bc-radius: 12px;
+  --bc-shadow: 0 24px 80px rgba(0, 0, 0, 0.56);
+}
+
+html.oled-dark {
+  --bc-bg: #000;
+  --bc-surface: #000;
+  --bc-raised: #060606;
+  --bc-hover: #0b0b0b;
+  --bc-line: rgba(255, 255, 255, 0.12);
+  --bc-line-strong: rgba(255, 255, 255, 0.2);
+}
+
+html.dark body,
+html.oled-dark body {
+  color: var(--bc-text) !important;
+  background: var(--bc-bg) !important;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html.dark body::before,
+html.oled-dark body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(850px 460px at 15% -12%, rgba(174, 129, 255, 0.075), transparent 66%),
+    radial-gradient(650px 400px at 93% -5%, rgba(166, 226, 46, 0.045), transparent 65%);
+}
+
+html.dark :is(h1, h2, h3, [class*="title"]),
+html.oled-dark :is(h1, h2, h3, [class*="title"]) {
+  font-family: "Plus Jakarta Sans", Inter, sans-serif;
+  letter-spacing: -0.032em;
+}
+
+html.dark :is(nav, aside, [id*="sidebar"], [class*="sidebar"]),
+html.oled-dark :is(nav, aside, [id*="sidebar"], [class*="sidebar"]) {
+  border-color: var(--bc-line) !important;
+  background-color: color-mix(in srgb, var(--bc-surface) 92%, transparent) !important;
+  backdrop-filter: blur(22px) saturate(140%);
+}
+
+html.dark :is(header, [class*="navbar"], [class*="topbar"]),
+html.oled-dark :is(header, [class*="navbar"], [class*="topbar"]) {
+  border-color: var(--bc-line) !important;
+  background-color: color-mix(in srgb, var(--bc-bg) 84%, transparent) !important;
+  backdrop-filter: blur(22px) saturate(140%);
+}
+
+html.dark :is(input, textarea, select),
+html.oled-dark :is(input, textarea, select) {
+  border-color: var(--bc-line) !important;
+  border-radius: 11px !important;
+  color: var(--bc-text) !important;
+  background: var(--bc-raised) !important;
+  box-shadow: none !important;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease !important;
+}
+
+html.dark :is(input, textarea, select):focus,
+html.oled-dark :is(input, textarea, select):focus {
+  border-color: color-mix(in srgb, var(--bc-green) 60%, transparent) !important;
+  background: var(--bc-hover) !important;
+  box-shadow: 0 0 0 3px rgba(166, 226, 46, 0.09) !important;
+}
+
+/* Main prompt composer: deliberately calmer and denser than upstream. */
+html.dark :is(form, [class*="chat-input"], [class*="prompt"]):has(textarea),
+html.oled-dark :is(form, [class*="chat-input"], [class*="prompt"]):has(textarea) {
+  border-color: var(--bc-line-strong) !important;
+  border-radius: 18px !important;
+  background: color-mix(in srgb, var(--bc-surface) 92%, transparent) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.34), inset 0 1px rgba(255, 255, 255, 0.025) !important;
+  backdrop-filter: blur(24px) saturate(135%);
+}
+
+html.dark :is(button, [role="button"]),
+html.oled-dark :is(button, [role="button"]) {
+  border-radius: 10px;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 150ms ease !important;
+}
+
+html.dark :is(button, [role="button"]):hover,
+html.oled-dark :is(button, [role="button"]):hover {
+  transform: translateY(-1px);
+}
+
+html.dark :is([role="menu"], [role="listbox"], [data-radix-menu-content], [class*="dropdown"], [class*="popover"]),
+html.oled-dark :is([role="menu"], [role="listbox"], [data-radix-menu-content], [class*="dropdown"], [class*="popover"]) {
+  border: 1px solid var(--bc-line-strong) !important;
+  border-radius: 14px !important;
+  color: var(--bc-text) !important;
+  background: color-mix(in srgb, var(--bc-surface) 94%, transparent) !important;
+  box-shadow: var(--bc-shadow) !important;
+  backdrop-filter: blur(26px) saturate(145%);
+  animation: bc-pop 150ms ease-out;
+}
+
+html.dark :is([role="menuitem"], [role="option"]):hover,
+html.dark :is([role="menuitem"], [role="option"])[data-highlighted],
+html.oled-dark :is([role="menuitem"], [role="option"]):hover,
+html.oled-dark :is([role="menuitem"], [role="option"])[data-highlighted] {
+  color: var(--bc-text) !important;
+  background: var(--bc-hover) !important;
+}
+
+html.dark :is([role="dialog"], [class*="modal"]),
+html.oled-dark :is([role="dialog"], [class*="modal"]) {
+  border-color: var(--bc-line-strong) !important;
+  border-radius: 18px !important;
+  color: var(--bc-text) !important;
+  background: var(--bc-surface) !important;
+  box-shadow: var(--bc-shadow) !important;
+}
+
+html.dark :is(pre, code),
+html.oled-dark :is(pre, code) {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace !important;
+}
+
+html.dark pre,
+html.oled-dark pre {
+  border: 1px solid var(--bc-line) !important;
+  border-radius: 12px !important;
+  background: #050505 !important;
+}
+
+html.dark :is(.prose, [class*="message"]) a,
+html.oled-dark :is(.prose, [class*="message"]) a {
+  color: var(--bc-green) !important;
+  text-decoration-color: rgba(166, 226, 46, 0.35) !important;
+  text-underline-offset: 3px;
+}
+
+html.dark :is([class*="message"], [data-message-id]),
+html.oled-dark :is([class*="message"], [data-message-id]) {
+  scroll-margin-top: 72px;
+}
+
+html.dark hr,
+html.oled-dark hr {
+  border-color: var(--bc-line) !important;
+}
+
+html.dark ::selection,
+html.oled-dark ::selection {
+  background: rgba(174, 129, 255, 0.38);
+}
+
+html.dark ::-webkit-scrollbar,
+html.oled-dark ::-webkit-scrollbar { width: 10px; height: 10px; }
+html.dark ::-webkit-scrollbar-track,
+html.oled-dark ::-webkit-scrollbar-track { background: transparent; }
+html.dark ::-webkit-scrollbar-thumb,
+html.oled-dark ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.17);
+  background-clip: padding-box;
+}
+
+html.dark :is([class*="skeleton"], [class*="animate-pulse"]),
+html.oled-dark :is([class*="skeleton"], [class*="animate-pulse"]) {
+  background-color: var(--bc-raised) !important;
+}
+
+@keyframes bc-pop {
+  from { opacity: 0; transform: translateY(-5px) scale(0.985); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.dark *, html.dark *::before, html.dark *::after,
+  html.oled-dark *, html.oled-dark *::before, html.oled-dark *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

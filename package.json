@@ -1,0 +1,33 @@
+{
+  "name": "cloud-at-home",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:media": "npm run dev -w @cloud-at-home/media",
+    "dev:files": "npm run dev -w @cloud-at-home/files",
+    "build": "npm run build -ws --if-present",
+    "check:public": "bash scripts/check-public-safety.sh",
+    "test": "npm run check:public && npm run test -ws --if-present",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@types/sanitize-html": "^2.16.0",
+    "@playwright/test": "^1.54.1",
+    "@vitejs/plugin-react": "^4.6.0",
+    "dompurify": "^3.4.11",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.4",
+    "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "dompurify": "$dompurify"
+  }
+}
