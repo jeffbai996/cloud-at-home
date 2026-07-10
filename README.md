@@ -1,11 +1,30 @@
 # cloud-at-home
 
+![Version](https://img.shields.io/badge/version-0.1.0-f97316?style=flat-square)
+![Stage](https://img.shields.io/badge/stage-early%20alpha-334155?style=flat-square)
+![Self-hosted](https://img.shields.io/badge/deployment-self--hosted-0f766e?style=flat-square)
+![TypeScript](https://img.shields.io/badge/frontend-TypeScript-3178c6?style=flat-square)
+![Python](https://img.shields.io/badge/gateway-Python-3776ab?style=flat-square)
+![Public-source safety](https://img.shields.io/badge/public--source%20safety-enforced-16a34a?style=flat-square)
+
 Private-first, self-hosted cloud applications backed by established services:
 
 - **Cloud Media** — movies and television through Jellyfin
 - **Cloud Files** — Finder-style FileBrowser client with editors, previews, transfers, and recoverable trash
 - **Service switcher** — navigation between media, files, local AI, and optional runtime-configured services
 - **Gateway** — encrypted upstream sessions, scoped proxy policies, preferences, playback tickets, and trash metadata
+
+## Preview
+
+Early v0.1 concept mockups; the interface is still evolving.
+
+### Cloud Media
+
+![Cloud Media streaming interface demo](docs/images/cloud-media-demo.png)
+
+### Cloud Files
+
+![Cloud Files file-management interface demo](docs/images/cloud-files-demo.png)
 
 The stock services remain the data, authentication, and permission authorities.
 Runtime credentials, databases, hostnames, media, and machine-specific service
