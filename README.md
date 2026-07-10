@@ -74,3 +74,7 @@ The repository uses neutral product names and must not inherit deployment-only
 branding, hostnames, URLs, credentials, or personal data. Run
 `npm run check:public` before committing; the same check runs in CI and as part
 of `npm test`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
