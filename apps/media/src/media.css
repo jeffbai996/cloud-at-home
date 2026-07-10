@@ -143,7 +143,8 @@
 }
 
 @media (max-width: 520px) {
-  .app-media .brand > span:last-child { display: none; }
+  .app-media .brand { gap: 7px; font-size: 13px; letter-spacing: -.02em; }
+  .app-media .brand > span:last-child { display: inline; white-space: nowrap; }
   .app-media .brand-mark-media { width: 31px; height: 31px; flex: 0 0 31px; }
   .app-media .topbar-left, .app-media .topbar-actions { gap: 6px; }
   .media-search { width: min(32vw, 126px); }
