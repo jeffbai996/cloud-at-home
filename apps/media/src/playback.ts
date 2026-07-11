@@ -12,8 +12,21 @@ export function captionFontSize(value?: number): number {
   return Math.min(200, Math.max(0, value as number));
 }
 
+export function captionVerticalOffset(value?: number): number {
+  if (!Number.isFinite(value)) return 8;
+  return Math.min(30, Math.max(0, value as number));
+}
+
+export function usesNativeVideoFullscreen(userAgent: string): boolean {
+  return /iPhone|iPod/.test(userAgent);
+}
+
 export function pauseCinemaVisible(paused: boolean, elapsedMs: number): boolean {
   return paused && elapsedMs >= 10_000;
+}
+
+export function shouldAutoPictureInPicture(paused: boolean, ended: boolean, readyState: number): boolean {
+  return !paused && !ended && readyState >= 2;
 }
 
 export type PlaybackStatsInput = {
@@ -62,6 +75,12 @@ export const webPlaybackProfile = {
       MinSegments: 1,
       BreakOnNonKeyFrames: true,
     },
+  ],
+  SubtitleProfiles: [
+    { Format: "srt", Method: "External" },
+    { Format: "subrip", Method: "External" },
+    { Format: "vtt", Method: "External" },
+    { Format: "webvtt", Method: "External" },
   ],
 } as const;
 
@@ -114,32 +133,22 @@ export function activeCueText(cues: ArrayLike<{ text: string }> | null): string 
     .join("\n");
 }
 
-const subtitleLanguages: Record<string, string> = { chi: "Chinese", eng: "English", en: "English", zh: "Chinese", zho: "Chinese" };
-
-function usableMetadata(value?: string): string | null {
-  const normalized = value?.trim();
-  if (!normalized || /^(undefined|null|unknown)$/i.test(normalized)) return null;
-  return normalized;
-}
-
 export function subtitleTrackLabel(stream: {
   DisplayTitle?: string;
   Language?: string;
   Title?: string;
   Index: number;
 }): string {
-  const raw = usableMetadata(stream.Title) ?? usableMetadata(stream.DisplayTitle);
-  const cleaned = (raw ?? "")
-    .replace(/\b(?:subrip|srt|webvtt|vtt|ass|ssa|pgssub|pgs)\b/gi, "")
-    .replace(/\bexternal\b/gi, "")
-    .replace(/\s*[-|/]\s*(?=$|[-|/])/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .replace(/^\s*[-|/,]+|[-|/,]+\s*$/g, "")
-    .trim();
-  if (cleaned) return cleaned;
-  const language = usableMetadata(stream.Language);
-  if (language) return subtitleLanguages[language.toLowerCase()] ?? language.toUpperCase();
-  return `Subtitle ${stream.Index}`;
+  const cleaned = [stream.Title, stream.DisplayTitle, stream.Language]
+    .map((value) => (value ?? "")
+      .replace(/\b(?:subrip|srt|webvtt|vtt|ass|ssa|pgssub|pgs)\b/gi, "")
+      .replace(/\b(?:external|undefined|und)\b/gi, "")
+      .replace(/\s*[-|/]\s*(?=$|[-|/])/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .replace(/^\s*[-|/,]+|[-|/,]+\s*$/g, "")
+      .trim())
+    .find(Boolean);
+  return cleaned || `Subtitle track ${stream.Index + 1}`;
 }
 
 export type TrickplayInfo = {

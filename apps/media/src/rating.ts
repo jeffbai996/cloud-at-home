@@ -18,12 +18,12 @@ const tvGuidelinesUrl = "https://www.tvguidelines.org/ratings.html";
 const mpaUrl = "https://www.filmratings.com/ratings-guide/";
 
 const canadianFilmGuidance: Record<string, RatingGuidance> = {
-  G: { name: "General", authority: "B.C. Film Classification Office", description: "Suitable for viewers of all ages.", authorityUrl: bcFilmClassificationUrl },
-  PG: { name: "Parental Guidance", authority: "B.C. Film Classification Office", description: "Theme or content may not be suitable for all children. Parental discretion is advised.", authorityUrl: bcFilmClassificationUrl },
-  "14A": { name: "14 Accompaniment", authority: "B.C. Film Classification Office", description: "Suitable for viewers 14 years of age or older. Viewers under 14 years of age must be accompanied by an adult.", authorityUrl: bcFilmClassificationUrl },
-  "18A": { name: "18 Accompaniment", authority: "B.C. Film Classification Office", description: "Suitable for viewers 18 years of age or older. Viewers under 18 years of age must be accompanied by an adult.", authorityUrl: bcFilmClassificationUrl },
-  R: { name: "Restricted", authority: "B.C. Film Classification Office", description: "Restricted to viewers 18 years of age and over. Persons under 18 years of age are not permitted to attend under any circumstances.", authorityUrl: bcFilmClassificationUrl },
-  A: { name: "Adult", authority: "B.C. Film Classification Office", description: "Restricted to viewers 18 years of age and over. Persons under 18 years of age are not permitted to attend under any circumstances.", authorityUrl: bcFilmClassificationUrl },
+  G: { name: "General", authority: "British Columbia Film Classification Office", description: "Suitable for viewers of all ages.", authorityUrl: bcFilmClassificationUrl },
+  PG: { name: "Parental Guidance", authority: "British Columbia Film Classification Office", description: "Theme or content may not be suitable for all children. Parental discretion is advised.", authorityUrl: bcFilmClassificationUrl },
+  "14A": { name: "14 Accompaniment", authority: "British Columbia Film Classification Office", description: "Suitable for viewers 14 years of age or older. Viewers under 14 years of age must be accompanied by an adult.", authorityUrl: bcFilmClassificationUrl },
+  "18A": { name: "18 Accompaniment", authority: "British Columbia Film Classification Office", description: "Suitable for viewers 18 years of age or older. Viewers under 18 years of age must be accompanied by an adult.", authorityUrl: bcFilmClassificationUrl },
+  R: { name: "Restricted", authority: "British Columbia Film Classification Office", description: "Restricted to viewers 18 years of age and over. Persons under 18 years of age are not permitted to attend under any circumstances.", authorityUrl: bcFilmClassificationUrl },
+  A: { name: "Adult", authority: "British Columbia Film Classification Office", description: "Restricted to viewers 18 years of age and over. Persons under 18 years of age are not permitted to attend under any circumstances.", authorityUrl: bcFilmClassificationUrl },
 };
 
 const canadianTvGuidance: Record<string, RatingGuidance> = {
@@ -63,8 +63,8 @@ const canadianShapes: Record<string, RatingBadge["shape"]> = {
   PG: "rounded",
   "14A": "hex",
   "18A": "diamond",
-  R: "octagon",
-  A: "octagon",
+  R: "circle",
+  A: "circle",
 };
 
 export function ratingBadge(value: string): RatingBadge {

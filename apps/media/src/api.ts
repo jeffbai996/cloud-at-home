@@ -15,7 +15,10 @@ export type MediaItem = {
   Overview?: string;
   OfficialRating?: string;
   CommunityRating?: number;
+  CriticRating?: number;
   Genres?: string[];
+  Studios?: Array<{ Name: string }>;
+  ProductionLocations?: string[];
   RunTimeTicks?: number;
   IndexNumber?: number;
   ParentIndexNumber?: number;
@@ -61,11 +64,30 @@ export type PlaybackInfo = {
 
 let csrf = "";
 
-async function json<T>(url: string, options: RequestInit = {}): Promise<T> {
+export function httpErrorMessage(status: number, statusText = "", detail = ""): string {
+  const descriptions: Record<number, string> = {
+    400: "Bad request — the service could not understand the request.",
+    401: "Authentication expired — sign in again.",
+    403: "Request blocked — this profile does not have permission.",
+    404: "Not found — the requested media resource is unavailable.",
+    408: "Request timed out — try again.",
+    429: "Too many requests — wait a moment and retry.",
+    500: "Server error — the service could not complete the request.",
+    502: "Gateway error — the upstream service returned an invalid response.",
+    503: "Service unavailable — Jellyfin may be restarting.",
+    504: "Gateway timeout — Jellyfin took too long to respond.",
+  };
+  const cleanDetail = detail.trim();
+  return `${status}: ${cleanDetail || descriptions[status] || statusText || "Request failed."}`;
+}
+
+async function authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers);
   if (options.body && !(options.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (csrf && options.method && options.method !== "GET") headers.set("X-CSRF-Token", csrf);
-  let response = await fetch(url, { ...options, headers, credentials: "include" });
+  let response: Response;
+  try { response = await fetch(url, { ...options, headers, credentials: "include" }); }
+  catch { throw new Error("Network error: Could not reach Cloud Media."); }
   if (response.status === 401 && url.startsWith("/api/media/") && url !== "/api/auth/media/session") {
     const refreshed = await fetch("/api/auth/media/session", { credentials: "include" });
     if (refreshed.ok) {
@@ -75,9 +97,19 @@ async function json<T>(url: string, options: RequestInit = {}): Promise<T> {
       response = await fetch(url, { ...options, headers, credentials: "include" });
     }
   }
+  return response;
+}
+
+async function responseError(response: Response): Promise<Error> {
+  const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+  const detail = typeof payload?.error === "string" ? payload.error : "";
+  return new Error(httpErrorMessage(response.status, response.statusText, detail));
+}
+
+async function json<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const response = await authenticatedFetch(url, options);
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
-    throw new Error(payload.error ?? "Request failed");
+    throw await responseError(response);
   }
   return response.json() as Promise<T>;
 }
@@ -111,11 +143,29 @@ export async function mediaRequest<T>(path: string, options: RequestInit = {}): 
 }
 
 export function imageUrl(item: MediaItem, kind: "Primary" | "Backdrop" = "Primary", width = 720): string {
-  return `/api/media/proxy/Items/${item.Id}/Images/${kind}?maxWidth=${width}&quality=88`;
+  const tag = kind === "Backdrop" ? item.BackdropImageTags?.[0] : item.ImageTags?.[kind];
+  const cacheKey = tag ? `&tag=${encodeURIComponent(tag)}` : "";
+  return `/api/media/proxy/Items/${item.Id}/Images/${kind}?maxWidth=${width}&quality=88${cacheKey}`;
+}
+
+export function normalizeSubtitleVtt(value: string): string {
+  return value
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/^Region:[^\n]*\n+/m, "");
+}
+
+export async function loadSubtitleTrack(itemId: string, sourceId: string, index: number): Promise<string> {
+  const path = `Videos/${encodeURIComponent(itemId)}/${encodeURIComponent(sourceId)}/Subtitles/${index}/Stream.vtt`;
+  const response = await authenticatedFetch(`/api/media/proxy/${path}`);
+  if (!response.ok) throw await responseError(response);
+  const vtt = normalizeSubtitleVtt(await response.text());
+  if (!vtt.startsWith("WEBVTT")) throw new Error("Invalid subtitle data returned by Jellyfin.");
+  return URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
 }
 
 export async function loadHome(userId: string) {
-  const fields = "Overview,PrimaryImageAspectRatio,MediaSources,DateCreated,PremiereDate,EndDate,Status,Genres,OfficialRating,CommunityRating";
+  const fields = "Overview,PrimaryImageAspectRatio,MediaSources,DateCreated,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,OfficialRating,CommunityRating,CriticRating";
   const [resume, latest, movies, series] = await Promise.all([
     mediaRequest<{ Items: MediaItem[] }>(`Users/${userId}/Items/Resume?Limit=20&MediaTypes=Video&Fields=${fields}`),
     mediaRequest<MediaItem[]>(`Users/${userId}/Items/Latest?Limit=24&IncludeItemTypes=Movie,Episode&Fields=${fields}`),
@@ -134,10 +184,28 @@ export async function loadHome(userId: string) {
   return { resume: (resume.Items ?? []).map(enrich), latest: (latest ?? []).map(enrich), movies: movies.Items ?? [], series: shows };
 }
 
+export function watchHistoryItemIds(...groups: MediaItem[][]): string[] {
+  return [...new Set(groups.flat().map((item) => item.Id))];
+}
+
+export async function clearWatchHistory(userId: string): Promise<number> {
+  const base = `Users/${encodeURIComponent(userId)}/Items?Recursive=true&IncludeItemTypes=Movie,Episode&EnableUserData=true&Limit=10000&Filters=`;
+  const [played, resumable] = await Promise.all([
+    mediaRequest<{ Items: MediaItem[] }>(`${base}IsPlayed`),
+    mediaRequest<{ Items: MediaItem[] }>(`${base}IsResumable`),
+  ]);
+  const ids = watchHistoryItemIds(played.Items ?? [], resumable.Items ?? []);
+  await Promise.all(ids.map((itemId) => mediaRequest(
+    `UserPlayedItems/${encodeURIComponent(itemId)}?userId=${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+  )));
+  return ids.length;
+}
+
 export async function search(userId: string, term: string): Promise<MediaItem[]> {
   if (!term.trim()) return [];
   const result = await mediaRequest<{ Items: MediaItem[] }>(
-    `Users/${userId}/Items?Recursive=true&IncludeItemTypes=Movie,Series,Episode&SearchTerm=${encodeURIComponent(term)}&Limit=40&Fields=Overview,PremiereDate,EndDate,Status,Genres,OfficialRating,CommunityRating`,
+    `Users/${userId}/Items?Recursive=true&IncludeItemTypes=Movie,Series,Episode&SearchTerm=${encodeURIComponent(term)}&Limit=40&Fields=Overview,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,OfficialRating,CommunityRating,CriticRating`,
   );
   return result.Items ?? [];
 }
@@ -147,7 +215,7 @@ export function episodesForSeries(items: MediaItem[], seriesId: string): MediaIt
 }
 
 export async function getSeriesEpisodes(seriesId: string, userId: string): Promise<MediaItem[]> {
-  const fields = "Overview,PrimaryImageAspectRatio,Genres,OfficialRating,CommunityRating,SeriesId,SeriesName";
+  const fields = "Overview,PrimaryImageAspectRatio,Genres,Studios,ProductionLocations,OfficialRating,CommunityRating,CriticRating,SeriesId,SeriesName";
   try {
     const result = await mediaRequest<{ Items: MediaItem[] }>(
       `Shows/${seriesId}/Episodes?UserId=${encodeURIComponent(userId)}&Fields=${fields}&EnableUserData=true`,
@@ -166,7 +234,7 @@ export async function getSeriesEpisodes(seriesId: string, userId: string): Promi
 
 export async function getMediaItem(itemId: string, userId: string): Promise<MediaItem> {
   return mediaRequest<MediaItem>(
-    `Users/${encodeURIComponent(userId)}/Items/${encodeURIComponent(itemId)}?Fields=Overview,PremiereDate,EndDate,Status,Genres,OfficialRating,CommunityRating`,
+    `Users/${encodeURIComponent(userId)}/Items/${encodeURIComponent(itemId)}?Fields=Overview,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,OfficialRating,CommunityRating,CriticRating`,
   );
 }
 
@@ -178,6 +246,7 @@ export async function getPlaybackInfo(itemId: string, userId: string): Promise<P
       EnableDirectPlay: true,
       EnableDirectStream: true,
       EnableTranscoding: true,
+      SubtitleStreamIndex: -1,
       DeviceProfile: webPlaybackProfile,
     }),
   });

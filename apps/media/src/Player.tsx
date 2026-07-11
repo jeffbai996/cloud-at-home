@@ -19,14 +19,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { Button, Modal } from "@cloud-at-home/ui";
-import { createStreamTicket, getPlaybackInfo, getSeriesEpisodes, imageUrl, reportPlayback, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
-import { activeCueText, captionFontSize, formatPlaybackStats, mediaYearLabel, playbackStartPosition, shouldReportProgress, subtitleTrackLabel, trickplayFrame, type TrickplayInfo } from "./playback";
+import { createStreamTicket, getPlaybackInfo, getSeriesEpisodes, imageUrl, loadSubtitleTrack, reportPlayback, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
+import { activeCueText, captionFontSize, captionVerticalOffset, formatPlaybackStats, mediaYearLabel, playbackStartPosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, type TrickplayInfo } from "./playback";
 
 type SafariVideo = HTMLVideoElement & {
   webkitShowPlaybackTargetPicker?: () => void;
-  webkitCurrentPlaybackTargetIsWireless?: boolean;
   webkitEnterFullscreen?: () => void;
+  webkitCurrentPlaybackTargetIsWireless?: boolean;
+  webkitPresentationMode?: "inline" | "fullscreen" | "picture-in-picture";
+  webkitSupportsPresentationMode?: (mode: string) => boolean;
+  webkitSetPresentationMode?: (mode: "inline" | "fullscreen" | "picture-in-picture") => void;
   getVideoPlaybackQuality?: () => { droppedVideoFrames: number; totalVideoFrames: number };
+  remote?: { prompt?: () => Promise<void> };
 };
 
 type SafariFullscreenElement = HTMLDivElement & {
@@ -39,22 +43,16 @@ type SafariFullscreenDocument = Document & {
 };
 
 type CaptionPrefs = {
-  fontFamily: string;
   fontSize: number;
+  fontWeight: number;
   lineHeight: number;
   letterSpacing: number;
-  offset: number;
+  portraitOffset: number;
+  landscapeOffset: number;
   backgroundOpacity: number;
 };
 
-const captionFonts = [
-  { label: "Plus Jakarta Sans", value: '"Plus Jakarta Sans", sans-serif' },
-  { label: "Inter", value: "Inter, sans-serif" },
-  { label: "System Sans", value: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
-  { label: "Classic Serif", value: 'Georgia, "Times New Roman", serif' },
-  { label: "Monospace", value: '"SFMono-Regular", Consolas, "Liberation Mono", monospace' },
-] as const;
-const defaultCaptions: CaptionPrefs = { fontFamily: captionFonts[0].value, fontSize: 75, lineHeight: 1.25, letterSpacing: 0, offset: 8, backgroundOpacity: 0.72 };
+const defaultCaptions: CaptionPrefs = { fontSize: 75, fontWeight: 600, lineHeight: 1.25, letterSpacing: 0, portraitOffset: 8, landscapeOffset: 8, backgroundOpacity: 0.72 };
 const playbackPrefsKey = "cloud-media-playback";
 
 type PlaybackPrefs = { muted: boolean; volume: number; rate?: number; fit?: "contain" | "cover"; subtitleLanguage?: string; subtitlesOff?: boolean };
@@ -70,11 +68,17 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const hlsRef = useRef<Hls | null>(null);
   const subtitleTrackRef = useRef<HTMLTrackElement | null>(null);
   const subtitleCueListenerRef = useRef<(() => void) | null>(null);
+  const subtitleBlobUrlRef = useRef<string | null>(null);
+  const subtitleLoadRef = useRef(0);
   const nativeFullscreenRef = useRef(false);
   const lastReport = useRef(0);
   const positionRef = useRef(fromBeginning ? 0 : (item.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000);
   const stoppedRef = useRef(false);
   const reportQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const transportTimerRef = useRef<number | null>(null);
+  const controlsTimerRef = useRef<number | null>(null);
+  const seekingRef = useRef(false);
+  const seekTargetRef = useRef<number | null>(null);
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [playing, setPlaying] = useState(false);
   const playbackPrefs = useRef(loadPlaybackPrefs());
@@ -82,29 +86,48 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const [position, setPosition] = useState(fromBeginning ? 0 : (item.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000);
   const [duration, setDuration] = useState((item.RunTimeTicks ?? 0) / 10_000_000);
   const [controls, setControls] = useState(true);
+  const [transportHover, setTransportHover] = useState(false);
   const [settings, setSettings] = useState<"captions" | "playback" | "episodes" | null>(null);
   const [seriesEpisodes, setSeriesEpisodes] = useState<MediaItem[]>([]);
   const [captions, setCaptions] = useState<CaptionPrefs>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("cloud-media-captions") ?? "{}");
-      return { ...defaultCaptions, ...saved, fontSize: captionFontSize(saved.fontSize) };
+      const legacyOffset = captionVerticalOffset(saved.offset);
+      return {
+        ...defaultCaptions,
+        ...saved,
+        fontSize: captionFontSize(saved.fontSize),
+        portraitOffset: captionVerticalOffset(saved.portraitOffset ?? legacyOffset),
+        // A portrait-safe legacy value can land halfway up the picture after
+        // rotation. Start landscape lower, then remember both independently.
+        landscapeOffset: captionVerticalOffset(saved.landscapeOffset ?? Math.min(legacyOffset, 12)),
+      };
     }
     catch { return defaultCaptions; }
   });
+  const [smartphoneLandscape, setSmartphoneLandscape] = useState(() => window.matchMedia("(orientation: landscape) and (max-height: 600px)").matches);
   const [playbackRate, setPlaybackRate] = useState(playbackPrefs.current.rate ?? 1);
   const [videoFit, setVideoFit] = useState<"contain" | "cover">(playbackPrefs.current.fit ?? "contain");
   const [pauseCinema, setPauseCinema] = useState(false);
+  const [pauseFrame, setPauseFrame] = useState("");
   const [subtitleIndex, setSubtitleIndex] = useState<number | null>(null);
   const [cue, setCue] = useState("");
   const [subtitleRenderEpoch, setSubtitleRenderEpoch] = useState(0);
   const [seekPreview, setSeekPreview] = useState<{ time: number; left: number } | null>(null);
   const [seeking, setSeeking] = useState(false);
+  const [seekTarget, setSeekTarget] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [statsOpen, setStatsOpen] = useState(false);
+  const [viewportFullscreen, setViewportFullscreen] = useState(false);
   const [, setStatsEpoch] = useState(0);
 
   const source = info?.MediaSources?.[0];
   const yearLabel = mediaYearLabel(item);
+  const pauseTitle = item.SeriesName ?? item.Name;
+  const pauseTitleBreak = pauseTitle.lastIndexOf(" ");
+  const pauseTitleLead = pauseTitleBreak > 0 ? pauseTitle.slice(0, pauseTitleBreak + 1) : "";
+  const pauseTitleTail = pauseTitleBreak > 0 ? pauseTitle.slice(pauseTitleBreak + 1) : pauseTitle;
+  const captionOffset = smartphoneLandscape ? captions.landscapeOffset : captions.portraitOffset;
   const subtitles = useMemo(() => source?.MediaStreams?.filter((stream) => stream.Type === "Subtitle") ?? [], [source]);
   const videoStream = source?.MediaStreams?.find((stream) => stream.Type === "Video");
   const audioStream = source?.MediaStreams?.find((stream) => stream.Type === "Audio");
@@ -131,6 +154,10 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     const timer = window.setInterval(() => setStatsEpoch((value) => value + 1), 1_000);
     return () => window.clearInterval(timer);
   }, [settings]);
+  useEffect(() => () => {
+    if (transportTimerRef.current !== null) window.clearTimeout(transportTimerRef.current);
+    if (controlsTimerRef.current !== null) window.clearTimeout(controlsTimerRef.current);
+  }, []);
   useEffect(() => {
     if (!item.SeriesId) { setSeriesEpisodes([]); return; }
     let cancelled = false;
@@ -195,7 +222,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       const target = source.TranscodingUrl?.replace(/^\//, "") ?? direct;
       const url = ticketedStreamUrl(ticket, target);
       if (url.includes(".m3u8") && !video.canPlayType("application/vnd.apple.mpegurl") && Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true, backBufferLength: 90 });
+        const hls = new Hls({ enableWorker: true, backBufferLength: 90, renderTextTracksNatively: false });
         hls.loadSource(url);
         hls.attachMedia(video);
         hls.on(Hls.Events.ERROR, (_event, data) => data.fatal && setError(data.details));
@@ -242,6 +269,32 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   }, [enqueueReport, report]);
 
   useEffect(() => {
+    const enterPictureInPicture = () => {
+      const video = videoRef.current;
+      if (!video || !shouldAutoPictureInPicture(video.paused, video.ended, video.readyState)) return;
+      try {
+        if (video.webkitSupportsPresentationMode?.("picture-in-picture")) {
+          if (video.webkitPresentationMode !== "picture-in-picture") video.webkitSetPresentationMode?.("picture-in-picture");
+          return;
+        }
+        if (document.pictureInPictureEnabled && document.pictureInPictureElement !== video) {
+          void video.requestPictureInPicture().catch(() => undefined);
+        }
+      } catch {
+        // Safari may reject automatic PiP when the device setting or gesture
+        // policy disallows it; playback should continue uninterrupted.
+      }
+    };
+    const onVisibility = () => { if (document.hidden) enterPictureInPicture(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("blur", enterPictureInPicture);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("blur", enterPictureInPicture);
+    };
+  }, []);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (settings) return;
       const video = videoRef.current;
@@ -260,6 +313,14 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   useEffect(() => {
     localStorage.setItem("cloud-media-captions", JSON.stringify(captions));
   }, [captions]);
+
+  useEffect(() => {
+    const query = window.matchMedia("(orientation: landscape) and (max-height: 600px)");
+    const syncOrientation = () => setSmartphoneLandscape(query.matches);
+    query.addEventListener("change", syncOrientation);
+    syncOrientation();
+    return () => query.removeEventListener("change", syncOrientation);
+  }, []);
 
   useEffect(() => {
     if (!source || !videoRef.current) return;
@@ -302,10 +363,43 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     }
     subtitleCueListenerRef.current = null;
     subtitleTrackRef.current = null;
+    if (subtitleBlobUrlRef.current) URL.revokeObjectURL(subtitleBlobUrlRef.current);
+    subtitleBlobUrlRef.current = null;
     setCue("");
   }, []);
 
   useEffect(() => cleanupSubtitleTrack, [cleanupSubtitleTrack]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const disableUnmanagedTracks = () => {
+      for (let index = 0; index < video.textTracks.length; index += 1) {
+        const track = video.textTracks[index];
+        if (track !== subtitleTrackRef.current?.track) track.mode = "disabled";
+      }
+    };
+    video.textTracks.addEventListener("addtrack", disableUnmanagedTracks);
+    disableUnmanagedTracks();
+    return () => video.textTracks.removeEventListener("addtrack", disableUnmanagedTracks);
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    for (let index = 0; index < video.textTracks.length; index += 1) {
+      video.textTracks[index].mode = "disabled";
+    }
+    if (pauseCinema) {
+      setCue("");
+      return;
+    }
+    const selectedTrack = subtitleTrackRef.current?.track;
+    if (selectedTrack && subtitleIndex !== null) {
+      selectedTrack.mode = nativeFullscreenRef.current ? "showing" : "hidden";
+      syncSubtitleCue();
+    }
+  }, [pauseCinema, subtitleIndex, syncSubtitleCue]);
 
   useEffect(() => {
     const invalidateSubtitleLayer = () => {
@@ -337,17 +431,21 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     const begin = () => setNativeFullscreen(true);
     const end = () => setNativeFullscreen(false);
     const standardChange = () => setNativeFullscreen(document.fullscreenElement === video);
+    const presentationChange = () => setNativeFullscreen(video.webkitPresentationMode === "fullscreen" || video.webkitPresentationMode === "picture-in-picture");
     video.addEventListener("webkitbeginfullscreen", begin);
     video.addEventListener("webkitendfullscreen", end);
+    video.addEventListener("webkitpresentationmodechanged", presentationChange);
     document.addEventListener("fullscreenchange", standardChange);
     return () => {
       video.removeEventListener("webkitbeginfullscreen", begin);
       video.removeEventListener("webkitendfullscreen", end);
+      video.removeEventListener("webkitpresentationmodechanged", presentationChange);
       document.removeEventListener("fullscreenchange", standardChange);
     };
   }, [subtitleIndex, syncSubtitleCue]);
 
-  function chooseSubtitle(index: number | null) {
+  async function chooseSubtitle(index: number | null) {
+    const loadId = ++subtitleLoadRef.current;
     setSubtitleIndex(index);
     const selected = subtitles.find((entry) => entry.Index === index);
     playbackPrefs.current = {
@@ -364,24 +462,32 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       node.track.mode = "disabled";
       node.remove();
     });
-    if (index === null) return;
-    const stream = subtitles.find((entry) => entry.Index === index);
+    if (index === null) { setError(""); return; }
+    setError("");
+    let trackUrl: string;
+    try { trackUrl = await loadSubtitleTrack(item.Id, source.Id, index); }
+    catch (reason) {
+      if (loadId === subtitleLoadRef.current) setError(`Could not load subtitle track. ${reason instanceof Error ? reason.message : "Please try again."}`);
+      return;
+    }
+    if (loadId !== subtitleLoadRef.current) { URL.revokeObjectURL(trackUrl); return; }
+    subtitleBlobUrlRef.current = trackUrl;
     const track = document.createElement("track");
     track.kind = "subtitles";
-    track.default = true;
+    track.default = false;
     track.addEventListener("load", () => {
       subtitleTrackRef.current = track;
       track.track.mode = nativeFullscreenRef.current ? "showing" : "hidden";
       subtitleCueListenerRef.current = syncSubtitleCue;
       track.track.addEventListener("cuechange", syncSubtitleCue);
       syncSubtitleCue();
+      setError("");
     }, { once: true });
-    track.addEventListener("error", () => setError("Could not load that subtitle track"), { once: true });
-    track.src = stream?.DeliveryUrl
-      ? `/api/media/proxy/${stream.DeliveryUrl.replace(/^\//, "")}`
-      : `/api/media/proxy/Videos/${item.Id}/${source.Id}/Subtitles/${index}/Stream.vtt`;
-    video.appendChild(track);
+    track.addEventListener("error", () => setError("Could not load subtitle track."), { once: true });
+    track.src = trackUrl;
+    track.track.mode = "hidden";
     subtitleTrackRef.current = track;
+    video.appendChild(track);
     track.track.mode = nativeFullscreenRef.current ? "showing" : "hidden";
   }
 
@@ -394,6 +500,44 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     setSeekPreview({ time: fraction * (duration || 0), left });
   }
 
+  function commitSeek(target = seekTargetRef.current) {
+    const video = videoRef.current;
+    if (video && target !== null) {
+      // Pointer-up can be followed by one final native range change event.
+      // Avoid turning that duplicate value into a second HLS request.
+      if (Math.abs(video.currentTime - target) > .05) video.currentTime = target;
+      positionRef.current = target;
+      setPosition(target);
+    }
+    seekTargetRef.current = null;
+    setSeekTarget(null);
+  }
+
+  function changeSeekTarget(target: number) {
+    seekTargetRef.current = target;
+    setSeekTarget(target);
+    // Keyboard changes and track clicks do not begin a pointer drag.
+    if (!seekingRef.current) commitSeek(target);
+  }
+
+  function showAirPlayPicker() {
+    const video = videoRef.current;
+    if (!video) return;
+    setError("");
+    if (typeof video.webkitShowPlaybackTargetPicker === "function") {
+      try { video.webkitShowPlaybackTargetPicker(); }
+      catch { setError("Could not open AirPlay. Check that AirPlay is enabled on this Mac."); }
+      return;
+    }
+    if (typeof video.remote?.prompt === "function") {
+      void video.remote.prompt().catch((reason: { name?: string }) => {
+        if (reason?.name !== "AbortError") setError("Could not open wireless playback. Please try again.");
+      });
+      return;
+    }
+    setError("AirPlay is available in Safari on this Mac.");
+  }
+
   function toggleFullscreen() {
     const fullscreenDocument = document as SafariFullscreenDocument;
     if (document.fullscreenElement || fullscreenDocument.webkitFullscreenElement) {
@@ -402,15 +546,56 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       if (result instanceof Promise) void result.catch(() => undefined);
       return;
     }
+    if (viewportFullscreen) { setViewportFullscreen(false); return; }
+    if (usesNativeVideoFullscreen(navigator.userAgent)) {
+      const video = videoRef.current;
+      if (typeof video?.webkitEnterFullscreen === "function") {
+        try { video.webkitEnterFullscreen(); }
+        catch { setViewportFullscreen(true); window.scrollTo(0, 0); }
+      } else {
+        setViewportFullscreen(true);
+        window.scrollTo(0, 0);
+      }
+      return;
+    }
     const shell = shellRef.current;
     if (!shell) return;
+    if (isAppleTouchDevice()) {
+      setViewportFullscreen(true);
+      window.scrollTo(0, 0);
+      return;
+    }
     const request = shell.requestFullscreen?.bind(shell) ?? shell.webkitRequestFullscreen?.bind(shell);
-    if (!request) { videoRef.current?.webkitEnterFullscreen?.(); return; }
+    if (!request) {
+      setViewportFullscreen(true);
+      window.scrollTo(0, 0);
+      return;
+    }
     const result = request?.();
     if (result instanceof Promise) void result.catch(() => {
-      if (videoRef.current?.webkitEnterFullscreen) videoRef.current.webkitEnterFullscreen();
-      else setError("Fullscreen is not available in this browser");
+      setViewportFullscreen(true);
+      window.scrollTo(0, 0);
     });
+  }
+
+  function handlePlayerMouseMove(event: React.MouseEvent<HTMLDivElement>) {
+    setControls(true);
+    if (transportTimerRef.current !== null) window.clearTimeout(transportTimerRef.current);
+    if (controlsTimerRef.current !== null) window.clearTimeout(controlsTimerRef.current);
+    const target = event.target as Element;
+    const overControl = Boolean(target.closest(".player-controls button, .seek-wrap, .player-settings"));
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const inTransportArea = Math.abs(event.clientX - (bounds.left + bounds.width / 2)) <= Math.min(245, bounds.width * .27)
+      && Math.abs(event.clientY - (bounds.top + bounds.height / 2)) <= Math.min(105, bounds.height * .18);
+    const nearControlZone = inTransportArea
+      || event.clientY <= bounds.top + Math.min(120, bounds.height * .18)
+      || event.clientY >= bounds.bottom - Math.min(180, bounds.height * .28);
+    if (overControl || inTransportArea) setTransportHover(true);
+    else setTransportHover(false);
+    if (!overControl) {
+      transportTimerRef.current = window.setTimeout(() => setTransportHover(false), inTransportArea ? 10_000 : 900);
+      controlsTimerRef.current = window.setTimeout(() => setControls(false), nearControlZone ? 10_000 : 2_800);
+    }
   }
 
   function closePlayer() {
@@ -426,7 +611,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   }
 
   return (
-    <motion.div ref={shellRef} className={`player-shell ${pauseCinema ? "player-pause-cinema" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseMove={() => setControls(true)}>
+    <motion.div ref={shellRef} className={`player-shell ${controls ? "" : "player-controls-hidden"} ${pauseCinema ? "player-pause-cinema" : ""} ${viewportFullscreen ? "player-viewport-fullscreen" : ""} ${isAppleTouchDevice() ? "player-apple-touch" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseMove={handlePlayerMouseMove} onMouseLeave={() => { setTransportHover(false); setControls(false); }}>
       <video
         ref={videoRef}
         className="player-video"
@@ -435,7 +620,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
         autoPlay
         x-webkit-airplay="allow"
         onPlay={() => { setPlaying(true); setPauseCinema(false); }}
-        onPause={() => { setPlaying(false); report(true); }}
+        onPause={(event) => { setPlaying(false); setPauseFrame(captureVideoFrame(event.currentTarget)); report(true); }}
         onTimeUpdate={(event) => { positionRef.current = event.currentTarget.currentTime; setPosition(event.currentTarget.currentTime); syncSubtitleCue(); report(); }}
         onDurationChange={(event) => setDuration(event.currentTarget.duration)}
         onVolumeChange={(event) => {
@@ -443,18 +628,17 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
           playbackPrefs.current = { ...playbackPrefs.current, muted: event.currentTarget.muted, volume: event.currentTarget.volume };
           localStorage.setItem(playbackPrefsKey, JSON.stringify(playbackPrefs.current));
         }}
-        onSeeked={() => { positionRef.current = videoRef.current?.currentTime ?? positionRef.current; syncSubtitleCue(); report(true); }}
+        onSeeked={() => { positionRef.current = videoRef.current?.currentTime ?? positionRef.current; if (videoRef.current?.paused) setPauseFrame(captureVideoFrame(videoRef.current)); syncSubtitleCue(); report(true); }}
         onClick={(event) => event.currentTarget.paused ? void event.currentTarget.play() : event.currentTarget.pause()}
       />
       <AnimatePresence>
         {pauseCinema && (
           <motion.div className="pause-cinema" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .65, ease: [0.22, 1, 0.36, 1] }}>
-            <motion.div className="pause-cinema-art" style={{ backgroundImage: `url(${imageUrl(item, item.BackdropImageTags?.length ? "Backdrop" : "Primary", 1800)})` }} initial={{ scale: 1.055 }} animate={{ scale: 1.02 }} transition={{ duration: 1.1, ease: "easeOut" }} />
+            <motion.div className="pause-cinema-art" style={{ backgroundImage: `url(${pauseFrame || imageUrl(item, item.BackdropImageTags?.length ? "Backdrop" : "Primary", 1800)})` }} initial={{ scale: 1.055 }} animate={{ scale: 1.02 }} transition={{ duration: 1.1, ease: "easeOut" }} />
             <div className="pause-cinema-shade" />
             <motion.div className="pause-cinema-copy" initial={{ opacity: 0, x: -28, y: -18 }} animate={{ opacity: 1, x: 0, y: 0 }} transition={{ delay: .18, duration: .62, ease: [0.22, 1, 0.36, 1] }}>
               <div className="pause-cinema-heading">
-                <motion.h1 layoutId={`player-title-${item.Id}`}>{item.SeriesName ?? item.Name}</motion.h1>
-                {yearLabel && <span>{yearLabel}</span>}
+                <motion.h1 layoutId={`player-title-${item.Id}`}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <small>{yearLabel}</small>}</span></motion.h1>
               </div>
               {item.SeriesName && <h2>{item.Name}</h2>}
               {item.Overview && <p>{item.Overview}</p>}
@@ -462,13 +646,13 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
           </motion.div>
         )}
       </AnimatePresence>
-      {cue && <div key={subtitleRenderEpoch} data-render-epoch={subtitleRenderEpoch} className="subtitle-layer" style={{ bottom: `${captions.offset}%`, fontFamily: captions.fontFamily, fontSize: `clamp(${18 * captions.fontSize / 100}px, ${2.1 * captions.fontSize / 100}vw, ${48 * captions.fontSize / 100}px)`, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px` }}><span style={{ background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>{cue}</span></div>}
+      {cue && !pauseCinema && <div key={subtitleRenderEpoch} data-render-epoch={subtitleRenderEpoch} className="subtitle-layer" style={{ bottom: `${captionOffset}%`, fontSize: `clamp(${18 * captions.fontSize / 100}px, ${2.1 * captions.fontSize / 100}vw, ${48 * captions.fontSize / 100}px)`, fontWeight: captions.fontWeight, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px` }}><span style={{ background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>{cue}</span></div>}
       <div className="player-vignette" />
       <AnimatePresence>
         {controls && (
-          <motion.div className="player-controls" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseLeave={() => playing && setTimeout(() => setControls(false), 1200)}>
+          <motion.div className="player-controls" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <div className="player-top"><button className="player-icon" aria-label="Close player" onClick={closePlayer}><X /></button>{!pauseCinema && <div><div className="player-title-line"><motion.strong layoutId={`player-title-${item.Id}`}>{item.SeriesName ?? item.Name}</motion.strong>{yearLabel && <small>{yearLabel}</small>}</div>{item.SeriesName && <span>{item.Name}</span>}</div>}</div>
-            {!pauseCinema && <div className="player-center">
+            {!pauseCinema && !settings && <div className={`player-center ${transportHover ? "transport-hover" : ""}`}>
               <button onClick={() => { if (videoRef.current) videoRef.current.currentTime -= 10; }}><RotateCcw /><span>10</span></button>
               <button className="play-main" onClick={() => videoRef.current?.paused ? void videoRef.current?.play() : videoRef.current?.pause()}>{playing ? <Pause /> : <Play />}</button>
               <button onClick={() => { if (videoRef.current) videoRef.current.currentTime += 10; }}><RotateCw /><span>10</span></button>
@@ -476,12 +660,12 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
             <div className="player-bottom">
               <div
                 className="seek-wrap"
-                onPointerEnter={updateSeekPreview}
-                onPointerMove={updateSeekPreview}
+                onPointerEnter={(event) => { if (!isAppleTouchDevice() || event.pointerType !== "mouse") updateSeekPreview(event); }}
+                onPointerMove={(event) => { if (seekingRef.current || !isAppleTouchDevice() || event.pointerType !== "mouse") updateSeekPreview(event); }}
                 onPointerLeave={() => { if (!seeking) setSeekPreview(null); }}
-                onPointerDown={(event) => { setSeeking(true); event.currentTarget.setPointerCapture(event.pointerId); }}
-                onPointerUp={(event) => { setSeeking(false); setSeekPreview(null); event.currentTarget.releasePointerCapture(event.pointerId); }}
-                onPointerCancel={() => { setSeeking(false); setSeekPreview(null); }}
+                onPointerDown={(event) => { seekingRef.current = true; setSeeking(true); updateSeekPreview(event); if (event.pointerType !== "mouse") event.currentTarget.setPointerCapture(event.pointerId); }}
+                onPointerUp={(event) => { seekingRef.current = false; setSeeking(false); commitSeek(); setSeekPreview(null); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+                onPointerCancel={() => { seekingRef.current = false; seekTargetRef.current = null; setSeeking(false); setSeekTarget(null); setSeekPreview(null); }}
               >
                 {seekPreview && (
                   <div className="seek-preview" style={{ left: `${seekPreview.left}px` }}>
@@ -489,7 +673,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
                     <strong>{formatTime(seekPreview.time)}</strong>
                   </div>
                 )}
-                <input className="seek" aria-label="Seek video" type="range" min={0} max={duration || 1} step="0.1" value={position} onChange={(event) => { if (videoRef.current) videoRef.current.currentTime = Number(event.target.value); }} />
+                <input className="seek" aria-label="Seek video" type="range" min={0} max={duration || 1} step="0.1" value={seekTarget ?? position} onChange={(event) => changeSeekTarget(Number(event.target.value))} />
               </div>
               <div className="player-row">
                 <button className="player-icon player-bar-play" aria-label={playing ? "Pause" : "Play"} onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()}>{playing ? <Pause /> : <Play />}</button>
@@ -498,9 +682,9 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
                 <span className="player-spacer" />
                 {item.SeriesId && <button className="player-icon" aria-label="Choose episode" onClick={() => setSettings("episodes")}><ListVideo /></button>}
                 {subtitles.length > 0 && <button className="player-icon" aria-label="Subtitle settings" onClick={() => setSettings("captions")}><Captions /></button>}
-                <button className="player-icon" aria-label="AirPlay" onClick={() => videoRef.current?.webkitShowPlaybackTargetPicker?.()}><Airplay /></button>
+                <button className="player-icon" aria-label="AirPlay" onClick={(event) => { event.preventDefault(); event.stopPropagation(); showAirPlayPicker(); }}><Airplay /></button>
                 <button className="player-icon" aria-label="Playback settings" onClick={() => setSettings("playback")}><Settings2 /></button>
-                <button className="player-icon" aria-label="Enter fullscreen" onClick={toggleFullscreen}><Expand /></button>
+                <button className="player-icon" aria-label={viewportFullscreen ? "Exit fullscreen" : "Enter fullscreen"} onClick={toggleFullscreen}><Expand /></button>
               </div>
             </div>
           </motion.div>
@@ -510,13 +694,18 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       <Modal open={settings === "captions"} title="Subtitles" onClose={() => setSettings(null)}>
         <div className="player-settings player-settings-polished">
           <div className="settings-intro"><Captions /><div><strong>Caption appearance</strong><span>Saved automatically on this device</span></div></div>
-          <label className="settings-select"><span>Subtitle track</span><select value={subtitleIndex ?? ""} onChange={(event) => chooseSubtitle(event.target.value === "" ? null : Number(event.target.value))}><option value="">Off</option>{subtitles.map((stream) => <option key={stream.Index} value={stream.Index}>{subtitleTrackLabel(stream)}</option>)}</select></label>
-          <label><span>Subtitle font</span><select value={captions.fontFamily} onChange={(event) => setCaptions({ ...captions, fontFamily: event.target.value })}>{captionFonts.map((font) => <option key={font.label} value={font.value} style={{ fontFamily: font.value }}>{font.label}</option>)}</select></label>
-          <label><span>Text size <b>{captions.fontSize}%</b></span><input type="range" min="0" max="200" value={captions.fontSize} onChange={(event) => setCaptions({ ...captions, fontSize: captionFontSize(Number(event.target.value)) })} /></label>
-          <label><span>Line height — {captions.lineHeight.toFixed(2)}</span><input type="range" min="1" max="2" step="0.05" value={captions.lineHeight} onChange={(event) => setCaptions({ ...captions, lineHeight: Number(event.target.value) })} /></label>
-          <label><span>Letter spacing — {captions.letterSpacing}px</span><input type="range" min="-2" max="8" step="0.25" value={captions.letterSpacing} onChange={(event) => setCaptions({ ...captions, letterSpacing: Number(event.target.value) })} /></label>
-          <label><span>Vertical offset — {captions.offset}%</span><input type="range" min="-10" max="30" value={captions.offset} onChange={(event) => setCaptions({ ...captions, offset: Number(event.target.value) })} /></label>
-          <label><span>Background opacity — {Math.round(captions.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step="0.05" value={captions.backgroundOpacity} onChange={(event) => setCaptions({ ...captions, backgroundOpacity: Number(event.target.value) })} /></label>
+          <div className="caption-preview"><span style={{ fontSize: `${Math.max(13, captions.fontSize * .19)}px`, fontWeight: captions.fontWeight, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px`, background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>Subtitle preview</span></div>
+          <div className="settings-section">
+            <label className="settings-select"><span>Subtitle track</span><select value={subtitleIndex ?? ""} onChange={(event) => chooseSubtitle(event.target.value === "" ? null : Number(event.target.value))}><option value="">Off</option>{subtitles.map((stream) => <option key={stream.Index} value={stream.Index}>{subtitleTrackLabel(stream)}</option>)}</select></label>
+          </div>
+          <div className="settings-section settings-sliders">
+            <label><span>Text size <b>{captions.fontSize}%</b></span><input type="range" min="0" max="200" value={captions.fontSize} onChange={(event) => setCaptions({ ...captions, fontSize: captionFontSize(Number(event.target.value)) })} /></label>
+            <label><span>Font weight <b>{captions.fontWeight}</b></span><input type="range" min="300" max="800" step="100" value={captions.fontWeight} onChange={(event) => setCaptions({ ...captions, fontWeight: Number(event.target.value) })} /></label>
+            <label><span>Line height <b>{captions.lineHeight.toFixed(2)}</b></span><input type="range" min="1" max="2" step="0.05" value={captions.lineHeight} onChange={(event) => setCaptions({ ...captions, lineHeight: Number(event.target.value) })} /></label>
+            <label><span>Letter spacing <b>{captions.letterSpacing}px</b></span><input type="range" min="-2" max="8" step="0.25" value={captions.letterSpacing} onChange={(event) => setCaptions({ ...captions, letterSpacing: Number(event.target.value) })} /></label>
+            <label><span>Vertical offset <b>{captionOffset}%</b></span><input type="range" min="0" max="30" value={captionOffset} onChange={(event) => setCaptions({ ...captions, [smartphoneLandscape ? "landscapeOffset" : "portraitOffset"]: captionVerticalOffset(Number(event.target.value)) })} /></label>
+            <label><span>Background <b>{Math.round(captions.backgroundOpacity * 100)}%</b></span><input type="range" min="0" max="1" step="0.05" value={captions.backgroundOpacity} onChange={(event) => setCaptions({ ...captions, backgroundOpacity: Number(event.target.value) })} /></label>
+          </div>
           <div className="settings-actions"><Button variant="ghost" onClick={() => setCaptions(defaultCaptions)}>Reset</Button><Button variant="secondary" onClick={() => setSettings(null)}>Done</Button></div>
         </div>
       </Modal>
@@ -584,4 +773,24 @@ function formatTime(value: number): string {
   const minutes = Math.floor((seconds % 3600) / 60);
   const remainder = String(seconds % 60).padStart(2, "0");
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${remainder}` : `${minutes}:${remainder}`;
+}
+
+function captureVideoFrame(video: HTMLVideoElement): string {
+  if (!video.videoWidth || !video.videoHeight) return "";
+  const width = Math.min(1280, video.videoWidth);
+  const height = Math.round(width * video.videoHeight / video.videoWidth);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  try {
+    canvas.getContext("2d")?.drawImage(video, 0, 0, width, height);
+    return canvas.toDataURL("image/jpeg", .82);
+  } catch {
+    return "";
+  }
+}
+
+function isAppleTouchDevice(): boolean {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
