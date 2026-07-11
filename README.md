@@ -7,7 +7,7 @@
 ![Python](https://img.shields.io/badge/gateway-Python-3776ab?style=flat-square)
 ![Public-source safety](https://img.shields.io/badge/public--source%20safety-enforced-16a34a?style=flat-square)
 
-![cloud-at-home video application running on a home server deployment](docs/images/cloud-media-demo.png)
+![cloud-at-home video application running on a home server deployment](docs/images/cloud-at-home-hero.jpeg)
 
 *This image shows cloud-at-home’s video application, running on the developer’s home server deployment.*
 
