@@ -282,8 +282,15 @@ test("Cloud Media player shows a streaming-style time preview", async ({ page })
     });
   });
   await page.goto("http://127.0.0.1:8090");
+  await expect(page.getByRole("button", { name: "Home" })).toHaveCount(0);
+  await expect(page.locator(".brand")).toHaveAttribute("href", "/");
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.locator(".player-title-line strong")).toHaveText("Example movie");
+  const [mainLayer, headerLayer] = await Promise.all([
+    page.locator(".app > main").evaluate((element) => Number(getComputedStyle(element).zIndex)),
+    page.locator(".topbar").evaluate((element) => Number(getComputedStyle(element).zIndex)),
+  ]);
+  expect(mainLayer).toBeGreaterThan(headerLayer);
   await expect(page.locator(".player-title-line strong")).toHaveCSS("font-family", /Plus Jakarta Sans/);
   await expect(page.locator(".player-title-line small")).toHaveText("2024");
   expect(parseFloat(await page.locator(".player-title-line strong").evaluate((element) => getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);

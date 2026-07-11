@@ -14,7 +14,7 @@ import {
   VolumeX,
   X,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
@@ -63,6 +63,7 @@ function loadPlaybackPrefs(): PlaybackPrefs {
 }
 
 export function Player({ item, session, fromBeginning = false, onPlayEpisode, onClose }: { item: MediaItem; session: Session; fromBeginning?: boolean; onPlayEpisode?: (episode: MediaItem) => void; onClose: () => void }) {
+  const reduceMotion = useReducedMotion();
   const shellRef = useRef<SafariFullscreenElement>(null);
   const videoRef = useRef<SafariVideo>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -636,13 +637,13 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
           <motion.div className="pause-cinema" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .65, ease: [0.22, 1, 0.36, 1] }}>
             <motion.div className="pause-cinema-art" style={{ backgroundImage: `url(${pauseFrame || imageUrl(item, item.BackdropImageTags?.length ? "Backdrop" : "Primary", 1800)})` }} initial={{ scale: 1.055 }} animate={{ scale: 1.02 }} transition={{ duration: 1.1, ease: "easeOut" }} />
             <div className="pause-cinema-shade" />
-            <motion.div className="pause-cinema-copy" initial={{ opacity: 0, x: -28, y: -18 }} animate={{ opacity: 1, x: 0, y: 0 }} transition={{ delay: .18, duration: .62, ease: [0.22, 1, 0.36, 1] }}>
+            <div className="pause-cinema-copy">
               <div className="pause-cinema-heading">
-                <motion.h1 layoutId={`player-title-${item.Id}`}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <small>{yearLabel}</small>}</span></motion.h1>
+                <motion.h1 layoutId={`player-title-${item.Id}`} initial={reduceMotion ? false : { opacity: 0, x: -22 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: reduceMotion ? 0 : .12, duration: reduceMotion ? 0 : .55, ease: [0.22, 1, 0.36, 1] }}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <motion.small initial={reduceMotion ? false : { opacity: 0, x: -18, scale: .96 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ delay: reduceMotion ? 0 : .42, duration: reduceMotion ? 0 : .5, ease: [0.22, 1, 0.36, 1] }}>{yearLabel}</motion.small>}</span></motion.h1>
               </div>
-              {item.SeriesName && <h2>{item.Name}</h2>}
-              {item.Overview && <p>{item.Overview}</p>}
-            </motion.div>
+              {item.SeriesName && <motion.h2 initial={reduceMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : .56, duration: reduceMotion ? 0 : .48, ease: [0.22, 1, 0.36, 1] }}>{item.Name}</motion.h2>}
+              {item.Overview && <motion.p initial={reduceMotion ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : .68, duration: reduceMotion ? 0 : .56, ease: [0.22, 1, 0.36, 1] }}>{item.Overview}</motion.p>}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

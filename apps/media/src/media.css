@@ -228,6 +228,7 @@
 .episode-runtime { padding-right: 10px; color: var(--muted); font: 550 12px "Plus Jakarta Sans", sans-serif; white-space: nowrap; }
 
 .player-shell { position: fixed; inset: 0; z-index: 300; overflow: hidden; isolation: isolate; background: #000; }
+.app-media:has(.player-shell) > main { z-index: 60; }
 .player-shell.player-viewport-fullscreen { width: 100vw; height: 100dvh; inset: 0; overscroll-behavior: none; touch-action: manipulation; }
 .player-shell.player-controls-hidden,
 .player-shell.player-controls-hidden * { cursor: none !important; }
