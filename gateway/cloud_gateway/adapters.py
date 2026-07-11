@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -91,15 +92,19 @@ class ServiceAdapter:
 class JellyfinAdapter(ServiceAdapter):
     client_header = (
         'MediaBrowser Client="Cloud at Home", Device="Web", '
-        'DeviceId="cloud-home-web", Version="0.1.0"'
+        'DeviceId="cloud-at-home-web", Version="0.1.0"'
     )
 
     def login(self, username: str, password: str) -> AuthResult:
+        login_header = (
+            'MediaBrowser Client="Cloud at Home", Device="Web", '
+            f'DeviceId="cloud-at-home-web-{uuid.uuid4().hex}", Version="0.1.0"'
+        )
         try:
             response = requests.post(
                 f"{self.base_url}/Users/AuthenticateByName",
                 json={"Username": username, "Pw": password},
-                headers={"X-Emby-Authorization": self.client_header},
+                headers={"X-Emby-Authorization": login_header},
                 timeout=self.timeout[0],
             )
         except requests.RequestException as exc:

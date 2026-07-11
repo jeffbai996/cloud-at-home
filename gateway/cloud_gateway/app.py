@@ -215,7 +215,7 @@ def create_app(
             prefix = "api/" if service == "files" else ""
             forwarded_headers = {
                 key: value for key, value in request.headers.items()
-                if key.lower() in {"content-type", "range", "accept"}
+                if key.lower() in {"content-type", "range", "accept", "if-match", "if-unmodified-since"}
             }
             body = None
             if request.method in STATE_METHODS:
@@ -273,7 +273,9 @@ def create_app(
         match = re.match(r"^(?:Videos|videos)/([^/]+)/", upstream)
         if not match:
             return jsonify({"error": "stream path is not allowed"}), 403
-        item_id = match.group(1)
+        # Jellyfin formats the same GUID with hyphens in transcoding URLs even
+        # when its item APIs and our ticket request use the compact form.
+        item_id = match.group(1).replace("-", "")
         ticket = tickets.get(ticket_id, item_id)
         if ticket is None:
             return jsonify({"error": "stream ticket expired or invalid"}), 403
@@ -349,7 +351,10 @@ def create_app(
         entry_id = secrets.token_urlsafe(12)
         name = PurePosixPath(source).name
         destination = f"/.cloud-home-trash/{entry_id}/{name}"
-        mkdir = file_mutation(session, "PUT", f"/.cloud-home-trash/{entry_id}/")
+        root = file_mutation(session, "POST", "/.cloud-home-trash/?override=false")
+        if root.status not in {200, 201, 204, 409}:
+            return jsonify({"error": "could not create trash root"}), 502
+        mkdir = file_mutation(session, "POST", f"/.cloud-home-trash/{entry_id}/?override=false")
         if mkdir.status not in {200, 201, 204, 409}:
             return jsonify({"error": "could not create trash container"}), 502
         query = (

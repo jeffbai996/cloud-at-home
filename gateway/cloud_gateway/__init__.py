@@ -1,1 +1,1 @@
-"""Cloud-at-home gateway: narrow, typed adapters around local service APIs."""
+"""Cloud at Home gateway: narrow, typed adapters around local service APIs."""

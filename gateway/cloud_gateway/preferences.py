@@ -10,7 +10,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
     "view": "grid",
     "captions": {
         "fontFamily": "Inter",
-        "fontSize": 115,
+        "fontSize": 75,
         "fontWeight": 600,
         "lineHeight": 1.25,
         "letterSpacing": 0,
@@ -47,7 +47,7 @@ def merge_preferences(candidate: object) -> dict[str, Any]:
     if captions.get("fontFamily") in {"Inter", "Plus Jakarta Sans", "system-ui"}:
         merged["captions"]["fontFamily"] = captions["fontFamily"]
     merged["captions"].update({
-        "fontSize": int(_number(captions.get("fontSize"), 75, 200, defaults["fontSize"])),
+        "fontSize": int(_number(captions.get("fontSize"), 0, 200, defaults["fontSize"])),
         "fontWeight": int(_number(captions.get("fontWeight"), 400, 800, defaults["fontWeight"])),
         "lineHeight": _number(captions.get("lineHeight"), 1, 2, defaults["lineHeight"]),
         "letterSpacing": _number(captions.get("letterSpacing"), -2, 8, defaults["letterSpacing"]),
