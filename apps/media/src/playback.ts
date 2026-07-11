@@ -139,16 +139,38 @@ export function subtitleTrackLabel(stream: {
   Title?: string;
   Index: number;
 }): string {
-  const cleaned = [stream.Title, stream.DisplayTitle, stream.Language]
-    .map((value) => (value ?? "")
-      .replace(/\b(?:subrip|srt|webvtt|vtt|ass|ssa|pgssub|pgs)\b/gi, "")
-      .replace(/\b(?:external|undefined|und)\b/gi, "")
-      .replace(/\s*[-|/]\s*(?=$|[-|/])/g, " ")
-      .replace(/\s{2,}/g, " ")
-      .replace(/^\s*[-|/,]+|[-|/,]+\s*$/g, "")
-      .trim())
-    .find(Boolean);
-  return cleaned || `Subtitle track ${stream.Index + 1}`;
+  const languages: Array<[RegExp, string]> = [
+    [/^(?:en|eng)$/i, "English"],
+    [/^(?:zh|zho|chi|cmn)$/i, "Chinese"],
+    [/^(?:zh[-_]?hans)$/i, "Chinese Simplified"],
+    [/^(?:zh[-_]?hant)$/i, "Chinese Traditional"],
+    [/^(?:es|spa)$/i, "Spanish"],
+    [/^(?:fr|fra|fre)$/i, "French"],
+    [/^(?:de|deu|ger)$/i, "German"],
+    [/^(?:ja|jpn)$/i, "Japanese"],
+    [/^(?:ko|kor)$/i, "Korean"],
+    [/^(?:pt|por)$/i, "Portuguese"],
+    [/^(?:it|ita)$/i, "Italian"],
+    [/^(?:ru|rus)$/i, "Russian"],
+    [/^(?:ar|ara)$/i, "Arabic"],
+    [/^(?:hi|hin)$/i, "Hindi"],
+  ];
+  const language = (stream.Language ?? "").trim();
+  let label = languages.find(([pattern]) => pattern.test(language))?.[1];
+  const metadata = [stream.DisplayTitle, stream.Title].filter(Boolean).join(" ");
+  if (!label) {
+    const namedLanguages = [
+      "Chinese Simplified", "Chinese Traditional", "English", "Chinese", "Spanish",
+      "French", "German", "Japanese", "Korean", "Portuguese", "Italian", "Russian",
+      "Arabic", "Hindi",
+    ];
+    label = namedLanguages.find((name) => new RegExp(`\\b${name.replace(" ", "\\s+")}\\b`, "i").test(metadata));
+  }
+  if (!label) return `Subtitle track ${stream.Index + 1}`;
+  const qualifier = /\bforced\b/i.test(metadata) ? "Forced"
+    : /\b(?:sdh|hearing[ -]?impaired|closed captions?|cc)\b/i.test(metadata) ? "SDH"
+      : "";
+  return qualifier ? `${label} (${qualifier})` : label;
 }
 
 export type TrickplayInfo = {

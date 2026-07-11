@@ -150,12 +150,17 @@ describe("subtitle cues", () => {
   it("removes implementation details from track labels", () => {
     expect(subtitleTrackLabel({ Index: 3, DisplayTitle: "English - SUBRIP - External" })).toBe("English");
     expect(subtitleTrackLabel({ Index: 4, DisplayTitle: "Chinese Simplified | SRT | External" })).toBe("Chinese Simplified");
-    expect(subtitleTrackLabel({ Index: 5, Language: "eng" })).toBe("eng");
+    expect(subtitleTrackLabel({ Index: 5, Language: "eng" })).toBe("English");
+    expect(subtitleTrackLabel({ Index: 6, Title: "GalaxyRG", Language: "eng" })).toBe("English");
+    expect(subtitleTrackLabel({ Index: 7, DisplayTitle: "GalaxyRG / Chinese Traditional / PGS" })).toBe("Chinese Traditional");
+    expect(subtitleTrackLabel({ Index: 8, DisplayTitle: "English SDH - SUBRIP - External" })).toBe("English (SDH)");
+    expect(subtitleTrackLabel({ Index: 9, DisplayTitle: "English Forced - SRT" })).toBe("English (Forced)");
   });
 
   it("replaces Jellyfin's undefined language placeholder with a human label", () => {
     expect(subtitleTrackLabel({ Index: 0, DisplayTitle: "Undefined - SUBRIP - External" })).toBe("Subtitle track 1");
     expect(subtitleTrackLabel({ Index: 2, Language: "und" })).toBe("Subtitle track 3");
+    expect(subtitleTrackLabel({ Index: 4, Title: "GalaxyRG" })).toBe("Subtitle track 5");
   });
 });
 
