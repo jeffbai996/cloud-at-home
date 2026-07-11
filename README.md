@@ -7,7 +7,7 @@
 ![Python](https://img.shields.io/badge/gateway-Python-3776ab?style=flat-square)
 ![Public-source safety](https://img.shields.io/badge/public--source%20safety-enforced-16a34a?style=flat-square)
 
-![cloud-at-home video application running on a home server deployment](docs/images/cloud-at-home-hero.jpeg)
+![cloud-at-home video application running on a home server deployment](docs/images/cloud-at-home-hero-v2.jpeg)
 
 *This image shows cloud-at-home’s video application, running on the developer’s home server deployment.*
 
@@ -26,9 +26,19 @@ The screenshots are generic v0.2 product mockups; no private deployment data is 
 
 ![Cloud Media streaming interface demo](docs/images/cloud-media-demo.png)
 
+Browse, search, and play movies and television from a responsive streaming interface.
+
 ### Cloud Drive
 
 ![Cloud Files file-management interface demo](docs/images/cloud-files-demo.png)
+
+Browse, preview, edit, transfer, and recover files from a Finder-style interface.
+
+### Home server deployment
+
+![Cloud Media running on the developer's home server deployment](docs/images/cloud-at-home-hero.jpeg)
+
+*Cloud Media running on the developer’s home server deployment.*
 
 The stock services remain the data, authentication, and permission authorities.
 Runtime credentials, databases, hostnames, media, and machine-specific service
