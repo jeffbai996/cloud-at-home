@@ -7,6 +7,64 @@ export const progressEvents = [
   "teardown",
 ] as const;
 
+export function captionFontSize(value?: number): number {
+  if (!Number.isFinite(value)) return 75;
+  return Math.min(200, Math.max(0, value as number));
+}
+
+export function pauseCinemaVisible(paused: boolean, elapsedMs: number): boolean {
+  return paused && elapsedMs >= 10_000;
+}
+
+export type PlaybackStatsInput = {
+  width?: number;
+  height?: number;
+  mode: string;
+  container?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  bufferedSeconds?: number;
+  droppedFrames?: number;
+  totalFrames?: number;
+  rate: number;
+};
+
+export function formatPlaybackStats(input: PlaybackStatsInput): Array<[string, string]> {
+  const stats: Array<[string, string]> = [];
+  if (input.width && input.height) stats.push(["Resolution", `${input.width} × ${input.height}`]);
+  stats.push(["Playback", input.mode]);
+  if (input.container) stats.push(["Container", input.container.toUpperCase()]);
+  if (input.videoCodec) stats.push(["Video", input.videoCodec.toUpperCase()]);
+  if (input.audioCodec) stats.push(["Audio", input.audioCodec.toUpperCase()]);
+  if (Number.isFinite(input.bufferedSeconds)) stats.push(["Buffer", `${Math.max(0, input.bufferedSeconds ?? 0).toFixed(1)} s`]);
+  if (Number.isFinite(input.droppedFrames) && Number.isFinite(input.totalFrames)) {
+    stats.push(["Frames", `${input.droppedFrames?.toLocaleString()} dropped / ${input.totalFrames?.toLocaleString()}`]);
+  }
+  stats.push(["Speed", `${input.rate}×`]);
+  return stats;
+}
+
+export const webPlaybackProfile = {
+  Name: "Cloud Media Web",
+  MaxStreamingBitrate: 120_000_000,
+  DirectPlayProfiles: [
+    { Container: "mp4,m4v", Type: "Video", VideoCodec: "h264", AudioCodec: "aac,mp3,ac3" },
+  ],
+  TranscodingProfiles: [
+    {
+      Container: "ts",
+      Type: "Video",
+      VideoCodec: "h264",
+      AudioCodec: "aac",
+      Protocol: "hls",
+      Context: "Streaming",
+      MaxAudioChannels: "2",
+      MinSegments: 1,
+      BreakOnNonKeyFrames: true,
+    },
+  ],
+} as const;
+
 export function shouldReportProgress(input: {
   previous: number;
   current: number;
@@ -22,6 +80,33 @@ export function resumePosition(saved: number, duration: number): number {
     : normalized;
 }
 
+export function playbackStartPosition(saved: number, duration: number, fromBeginning: boolean): number {
+  return fromBeginning ? 0 : resumePosition(saved, duration);
+}
+
+export function isResumable(playbackPositionTicks?: number, played = false): boolean {
+  return !played && Number.isFinite(playbackPositionTicks) && (playbackPositionTicks ?? 0) > 0;
+}
+
+export function mediaYearLabel(item: {
+  Type: string;
+  ProductionYear?: number;
+  SeriesName?: string;
+  SeriesProductionYear?: number;
+  SeriesEndDate?: string;
+  EndDate?: string;
+}): string {
+  if (item.Type === "Movie") return item.ProductionYear ? String(item.ProductionYear) : "";
+  const series = Boolean(item.SeriesName) || item.Type === "Series";
+  if (!series) return "";
+  const start = item.SeriesProductionYear ?? item.ProductionYear;
+  if (!start) return "";
+  const endDate = item.SeriesEndDate ?? item.EndDate;
+  const end = endDate ? Number.parseInt(endDate.slice(0, 4), 10) : Number.NaN;
+  if (Number.isFinite(end) && end === start) return String(start);
+  return Number.isFinite(end) && end > start ? `${start} – ${end}` : `${start} –`;
+}
+
 export function activeCueText(cues: ArrayLike<{ text: string }> | null): string {
   if (!cues) return "";
   return Array.from(cues)
@@ -29,13 +114,7 @@ export function activeCueText(cues: ArrayLike<{ text: string }> | null): string 
     .join("\n");
 }
 
-const subtitleLanguages: Record<string, string> = {
-  chi: "Chinese",
-  eng: "English",
-  en: "English",
-  zh: "Chinese",
-  zho: "Chinese",
-};
+const subtitleLanguages: Record<string, string> = { chi: "Chinese", eng: "English", en: "English", zh: "Chinese", zho: "Chinese" };
 
 function usableMetadata(value?: string): string | null {
   const normalized = value?.trim();
@@ -43,9 +122,21 @@ function usableMetadata(value?: string): string | null {
   return normalized;
 }
 
-export function subtitleTrackLabel(stream: { Index: number; DisplayTitle?: string; Language?: string }): string {
-  const title = usableMetadata(stream.DisplayTitle);
-  if (title) return title;
+export function subtitleTrackLabel(stream: {
+  DisplayTitle?: string;
+  Language?: string;
+  Title?: string;
+  Index: number;
+}): string {
+  const raw = usableMetadata(stream.Title) ?? usableMetadata(stream.DisplayTitle);
+  const cleaned = (raw ?? "")
+    .replace(/\b(?:subrip|srt|webvtt|vtt|ass|ssa|pgssub|pgs)\b/gi, "")
+    .replace(/\bexternal\b/gi, "")
+    .replace(/\s*[-|/]\s*(?=$|[-|/])/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^\s*[-|/,]+|[-|/,]+\s*$/g, "")
+    .trim();
+  if (cleaned) return cleaned;
   const language = usableMetadata(stream.Language);
   if (language) return subtitleLanguages[language.toLowerCase()] ?? language.toUpperCase();
   return `Subtitle ${stream.Index}`;

@@ -3,11 +3,13 @@ import {
   Airplay,
   Captions,
   Expand,
+  ListVideo,
   Pause,
   Play,
   RotateCcw,
   RotateCw,
   Settings2,
+  SlidersHorizontal,
   Volume2,
   VolumeX,
   X,
@@ -17,12 +19,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { Button, Modal } from "@cloud-at-home/ui";
-import { createStreamTicket, getPlaybackInfo, reportPlayback, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
-import { activeCueText, resumePosition, shouldReportProgress, subtitleTrackLabel, trickplayFrame, type TrickplayInfo } from "./playback";
+import { createStreamTicket, getPlaybackInfo, getSeriesEpisodes, imageUrl, reportPlayback, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
+import { activeCueText, captionFontSize, formatPlaybackStats, mediaYearLabel, playbackStartPosition, shouldReportProgress, subtitleTrackLabel, trickplayFrame, type TrickplayInfo } from "./playback";
 
 type SafariVideo = HTMLVideoElement & {
   webkitShowPlaybackTargetPicker?: () => void;
   webkitCurrentPlaybackTargetIsWireless?: boolean;
+  webkitEnterFullscreen?: () => void;
+  getVideoPlaybackQuality?: () => { droppedVideoFrames: number; totalVideoFrames: number };
 };
 
 type SafariFullscreenElement = HTMLDivElement & {
@@ -50,34 +54,100 @@ const captionFonts = [
   { label: "Classic Serif", value: 'Georgia, "Times New Roman", serif' },
   { label: "Monospace", value: '"SFMono-Regular", Consolas, "Liberation Mono", monospace' },
 ] as const;
+const defaultCaptions: CaptionPrefs = { fontFamily: captionFonts[0].value, fontSize: 75, lineHeight: 1.25, letterSpacing: 0, offset: 8, backgroundOpacity: 0.72 };
+const playbackPrefsKey = "cloud-media-playback";
 
-const defaultCaptions: CaptionPrefs = { fontFamily: captionFonts[0].value, fontSize: 115, lineHeight: 1.25, letterSpacing: 0, offset: 8, backgroundOpacity: 0.72 };
+type PlaybackPrefs = { muted: boolean; volume: number; rate?: number; fit?: "contain" | "cover"; subtitleLanguage?: string; subtitlesOff?: boolean };
 
-export function Player({ item, session, onClose }: { item: MediaItem; session: Session; onClose: () => void }) {
+function loadPlaybackPrefs(): PlaybackPrefs {
+  try { return { muted: false, volume: 1, ...JSON.parse(localStorage.getItem(playbackPrefsKey) ?? "{}") }; }
+  catch { return { muted: false, volume: 1 }; }
+}
+
+export function Player({ item, session, fromBeginning = false, onPlayEpisode, onClose }: { item: MediaItem; session: Session; fromBeginning?: boolean; onPlayEpisode?: (episode: MediaItem) => void; onClose: () => void }) {
   const shellRef = useRef<SafariFullscreenElement>(null);
   const videoRef = useRef<SafariVideo>(null);
   const hlsRef = useRef<Hls | null>(null);
   const subtitleTrackRef = useRef<HTMLTrackElement | null>(null);
+  const subtitleCueListenerRef = useRef<(() => void) | null>(null);
+  const nativeFullscreenRef = useRef(false);
   const lastReport = useRef(0);
+  const positionRef = useRef(fromBeginning ? 0 : (item.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000);
+  const stoppedRef = useRef(false);
+  const reportQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [position, setPosition] = useState((item.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000);
+  const playbackPrefs = useRef(loadPlaybackPrefs());
+  const [muted, setMuted] = useState(playbackPrefs.current.muted);
+  const [position, setPosition] = useState(fromBeginning ? 0 : (item.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000);
   const [duration, setDuration] = useState((item.RunTimeTicks ?? 0) / 10_000_000);
   const [controls, setControls] = useState(true);
-  const [settings, setSettings] = useState(false);
+  const [settings, setSettings] = useState<"captions" | "playback" | "episodes" | null>(null);
+  const [seriesEpisodes, setSeriesEpisodes] = useState<MediaItem[]>([]);
   const [captions, setCaptions] = useState<CaptionPrefs>(() => {
-    try { return { ...defaultCaptions, ...JSON.parse(localStorage.getItem("cloud-media-captions") ?? "{}") }; }
+    try {
+      const saved = JSON.parse(localStorage.getItem("cloud-media-captions") ?? "{}");
+      return { ...defaultCaptions, ...saved, fontSize: captionFontSize(saved.fontSize) };
+    }
     catch { return defaultCaptions; }
   });
+  const [playbackRate, setPlaybackRate] = useState(playbackPrefs.current.rate ?? 1);
+  const [videoFit, setVideoFit] = useState<"contain" | "cover">(playbackPrefs.current.fit ?? "contain");
+  const [pauseCinema, setPauseCinema] = useState(false);
   const [subtitleIndex, setSubtitleIndex] = useState<number | null>(null);
   const [cue, setCue] = useState("");
+  const [subtitleRenderEpoch, setSubtitleRenderEpoch] = useState(0);
   const [seekPreview, setSeekPreview] = useState<{ time: number; left: number } | null>(null);
   const [seeking, setSeeking] = useState(false);
   const [error, setError] = useState("");
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [, setStatsEpoch] = useState(0);
 
   const source = info?.MediaSources?.[0];
+  const yearLabel = mediaYearLabel(item);
   const subtitles = useMemo(() => source?.MediaStreams?.filter((stream) => stream.Type === "Subtitle") ?? [], [source]);
+  const videoStream = source?.MediaStreams?.find((stream) => stream.Type === "Video");
+  const audioStream = source?.MediaStreams?.find((stream) => stream.Type === "Audio");
+  const video = videoRef.current;
+  const quality = video?.getVideoPlaybackQuality?.();
+  const bufferedSeconds = video?.buffered.length
+    ? Math.max(0, video.buffered.end(video.buffered.length - 1) - video.currentTime)
+    : 0;
+  const playbackStats = formatPlaybackStats({
+    width: video?.videoWidth || videoStream?.Width,
+    height: video?.videoHeight || videoStream?.Height,
+    mode: source?.TranscodingUrl ? "Transcoding" : "Direct play",
+    container: source?.Container,
+    videoCodec: videoStream?.Codec,
+    audioCodec: audioStream?.Codec,
+    bufferedSeconds,
+    droppedFrames: quality?.droppedVideoFrames,
+    totalFrames: quality?.totalVideoFrames,
+    rate: playbackRate,
+  });
+  useEffect(() => {
+    if (settings !== "playback") return;
+    setStatsEpoch((value) => value + 1);
+    const timer = window.setInterval(() => setStatsEpoch((value) => value + 1), 1_000);
+    return () => window.clearInterval(timer);
+  }, [settings]);
+  useEffect(() => {
+    if (!item.SeriesId) { setSeriesEpisodes([]); return; }
+    let cancelled = false;
+    void getSeriesEpisodes(item.SeriesId, session.user.id)
+      .then((episodes) => {
+        if (cancelled) return;
+        setSeriesEpisodes(episodes.map((episode) => ({
+          ...episode,
+          SeriesId: episode.SeriesId ?? item.SeriesId,
+          SeriesName: episode.SeriesName ?? item.SeriesName,
+          SeriesProductionYear: item.SeriesProductionYear,
+          SeriesEndDate: item.SeriesEndDate,
+        })));
+      })
+      .catch(() => { if (!cancelled) setSeriesEpisodes([]); });
+    return () => { cancelled = true; };
+  }, [item.SeriesEndDate, item.SeriesId, item.SeriesName, item.SeriesProductionYear, session.user.id]);
   const trickplay = useMemo(() => {
     const manifests = source?.Trickplay;
     if (!manifests) return null;
@@ -92,13 +162,20 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
     ItemId: item.Id,
     MediaSourceId: source?.Id,
     PlaySessionId: info?.PlaySessionId,
-    PositionTicks: Math.round((videoRef.current?.currentTime ?? position) * 10_000_000),
+    PositionTicks: Math.round((videoRef.current?.currentTime ?? positionRef.current) * 10_000_000),
     IsPaused: videoRef.current?.paused ?? true,
     IsMuted: videoRef.current?.muted ?? false,
     VolumeLevel: Math.round((videoRef.current?.volume ?? 1) * 100),
     PlayMethod: source?.TranscodingUrl ? "Transcode" : "DirectPlay",
     CanSeek: true,
-  }), [info?.PlaySessionId, item.Id, position, source?.Id, source?.TranscodingUrl]);
+  }), [info?.PlaySessionId, item.Id, source?.Id, source?.TranscodingUrl]);
+
+  const enqueueReport = useCallback((event: "start" | "progress" | "stop", keepalive = false) => {
+    const snapshot = payload();
+    const request = () => reportPlayback(event, snapshot, keepalive).catch(() => undefined);
+    reportQueueRef.current = reportQueueRef.current.then(request, request);
+    return reportQueueRef.current;
+  }, [payload]);
 
   useEffect(() => {
     getPlaybackInfo(item.Id, session.user.id).then(setInfo).catch((reason) => setError(String(reason.message ?? reason)));
@@ -109,8 +186,8 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
     const video = videoRef.current;
     let cancelled = false;
     const applyResume = () => {
-      const target = resumePosition(position, video.duration);
-      if (target > 0) video.currentTime = target;
+      const target = playbackStartPosition(position, video.duration, fromBeginning);
+      if (target > 0) { video.currentTime = target; positionRef.current = target; }
     };
     void createStreamTicket(item.Id).then((ticket) => {
       if (cancelled) return;
@@ -128,38 +205,41 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
       }
       if (video.readyState >= HTMLMediaElement.HAVE_METADATA) applyResume();
       else video.addEventListener("loadedmetadata", applyResume, { once: true });
-      void reportPlayback("start", payload()).catch(() => undefined);
+      void enqueueReport("start");
     }).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not create playback session"));
     return () => {
       cancelled = true;
       video.removeEventListener("loadedmetadata", applyResume);
-      void reportPlayback("stop", payload()).catch(() => undefined);
+      if (!stoppedRef.current) {
+        stoppedRef.current = true;
+        void enqueueReport("stop", true);
+      }
       hlsRef.current?.destroy();
       hlsRef.current = null;
     };
     // Source identity is the lifecycle boundary; payload intentionally reads refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source?.Id]);
+  }, [source?.Id, fromBeginning]);
 
   const report = useCallback((force = false) => {
     const video = videoRef.current;
     if (!video || !info) return;
     if (force || shouldReportProgress({ previous: lastReport.current, current: video.currentTime, paused: video.paused })) {
       lastReport.current = video.currentTime;
-      void reportPlayback("progress", payload()).catch(() => undefined);
+      void enqueueReport("progress");
     }
-  }, [info, payload]);
+  }, [enqueueReport, info]);
 
   useEffect(() => {
     const onVisibility = () => document.hidden && report(true);
-    const onPageHide = () => report(true);
+    const onPageHide = () => { if (!stoppedRef.current) void enqueueReport("progress", true); };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pagehide", onPageHide);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", onPageHide);
     };
-  }, [report]);
+  }, [enqueueReport, report]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -181,17 +261,105 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
     localStorage.setItem("cloud-media-captions", JSON.stringify(captions));
   }, [captions]);
 
+  useEffect(() => {
+    if (!source || !videoRef.current) return;
+    const video = videoRef.current;
+    video.volume = Math.min(1, Math.max(0, playbackPrefs.current.volume));
+    video.muted = playbackPrefs.current.muted;
+    video.playbackRate = playbackPrefs.current.rate ?? 1;
+    if (playbackPrefs.current.subtitlesOff) return;
+    const preferred = subtitles.find((stream) => stream.Language === playbackPrefs.current.subtitleLanguage);
+    if (preferred) chooseSubtitle(preferred.Index);
+    // Restore once for each media source after its stream list arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source?.Id, subtitles]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) video.playbackRate = playbackRate;
+    playbackPrefs.current = { ...playbackPrefs.current, rate: playbackRate, fit: videoFit };
+    localStorage.setItem(playbackPrefsKey, JSON.stringify(playbackPrefs.current));
+  }, [playbackRate, videoFit]);
+
+  useEffect(() => {
+    if (playing) { setPauseCinema(false); return; }
+    const timer = window.setTimeout(() => { setPauseCinema(true); setControls(false); }, 10_000);
+    return () => window.clearTimeout(timer);
+  }, [playing, position]);
+
   const syncSubtitleCue = useCallback(() => {
+    if (nativeFullscreenRef.current) { setCue(""); return; }
     const active = subtitleTrackRef.current?.track.activeCues as unknown as ArrayLike<{ text: string }> | null | undefined;
     setCue(activeCueText(active ?? null));
   }, []);
 
+  const cleanupSubtitleTrack = useCallback(() => {
+    const track = subtitleTrackRef.current;
+    if (track) {
+      if (subtitleCueListenerRef.current) track.track.removeEventListener("cuechange", subtitleCueListenerRef.current);
+      track.track.mode = "disabled";
+      track.remove();
+    }
+    subtitleCueListenerRef.current = null;
+    subtitleTrackRef.current = null;
+    setCue("");
+  }, []);
+
+  useEffect(() => cleanupSubtitleTrack, [cleanupSubtitleTrack]);
+
+  useEffect(() => {
+    const invalidateSubtitleLayer = () => {
+      if (document.hidden) return;
+      syncSubtitleCue();
+      setSubtitleRenderEpoch((epoch) => epoch + 1);
+    };
+    window.addEventListener("pageshow", invalidateSubtitleLayer);
+    document.addEventListener("visibilitychange", invalidateSubtitleLayer);
+    document.addEventListener("fullscreenchange", invalidateSubtitleLayer);
+    document.addEventListener("webkitfullscreenchange", invalidateSubtitleLayer);
+    return () => {
+      window.removeEventListener("pageshow", invalidateSubtitleLayer);
+      document.removeEventListener("visibilitychange", invalidateSubtitleLayer);
+      document.removeEventListener("fullscreenchange", invalidateSubtitleLayer);
+      document.removeEventListener("webkitfullscreenchange", invalidateSubtitleLayer);
+    };
+  }, [syncSubtitleCue]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const setNativeFullscreen = (active: boolean) => {
+      nativeFullscreenRef.current = active;
+      const track = subtitleTrackRef.current?.track;
+      if (track && subtitleIndex !== null) track.mode = active ? "showing" : "hidden";
+      if (active) setCue(""); else syncSubtitleCue();
+    };
+    const begin = () => setNativeFullscreen(true);
+    const end = () => setNativeFullscreen(false);
+    const standardChange = () => setNativeFullscreen(document.fullscreenElement === video);
+    video.addEventListener("webkitbeginfullscreen", begin);
+    video.addEventListener("webkitendfullscreen", end);
+    document.addEventListener("fullscreenchange", standardChange);
+    return () => {
+      video.removeEventListener("webkitbeginfullscreen", begin);
+      video.removeEventListener("webkitendfullscreen", end);
+      document.removeEventListener("fullscreenchange", standardChange);
+    };
+  }, [subtitleIndex, syncSubtitleCue]);
+
   function chooseSubtitle(index: number | null) {
     setSubtitleIndex(index);
+    const selected = subtitles.find((entry) => entry.Index === index);
+    playbackPrefs.current = {
+      ...playbackPrefs.current,
+      subtitleLanguage: selected?.Language,
+      subtitlesOff: index === null,
+    };
+    localStorage.setItem(playbackPrefsKey, JSON.stringify(playbackPrefs.current));
     setCue("");
     const video = videoRef.current;
     if (!video || !source) return;
-    subtitleTrackRef.current = null;
+    cleanupSubtitleTrack();
     [...video.querySelectorAll("track")].forEach((node) => {
       node.track.mode = "disabled";
       node.remove();
@@ -203,7 +371,8 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
     track.default = true;
     track.addEventListener("load", () => {
       subtitleTrackRef.current = track;
-      track.track.mode = "hidden";
+      track.track.mode = nativeFullscreenRef.current ? "showing" : "hidden";
+      subtitleCueListenerRef.current = syncSubtitleCue;
       track.track.addEventListener("cuechange", syncSubtitleCue);
       syncSubtitleCue();
     }, { once: true });
@@ -213,7 +382,7 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
       : `/api/media/proxy/Videos/${item.Id}/${source.Id}/Subtitles/${index}/Stream.vtt`;
     video.appendChild(track);
     subtitleTrackRef.current = track;
-    track.track.mode = "hidden";
+    track.track.mode = nativeFullscreenRef.current ? "showing" : "hidden";
   }
 
   function updateSeekPreview(event: ReactPointerEvent<HTMLDivElement>) {
@@ -236,37 +405,74 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
     const shell = shellRef.current;
     if (!shell) return;
     const request = shell.requestFullscreen?.bind(shell) ?? shell.webkitRequestFullscreen?.bind(shell);
+    if (!request) { videoRef.current?.webkitEnterFullscreen?.(); return; }
     const result = request?.();
-    if (result instanceof Promise) void result.catch(() => setError("Fullscreen is not available in this browser"));
+    if (result instanceof Promise) void result.catch(() => {
+      if (videoRef.current?.webkitEnterFullscreen) videoRef.current.webkitEnterFullscreen();
+      else setError("Fullscreen is not available in this browser");
+    });
+  }
+
+  function closePlayer() {
+    if (stoppedRef.current) { onClose(); return; }
+    stoppedRef.current = true;
+    void enqueueReport("stop").finally(onClose);
+  }
+
+  function playEpisode(episode: MediaItem) {
+    if (!onPlayEpisode || episode.Id === item.Id) { setSettings(null); return; }
+    stoppedRef.current = true;
+    void enqueueReport("stop").finally(() => onPlayEpisode(episode));
   }
 
   return (
-    <motion.div ref={shellRef} className="player-shell" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseMove={() => setControls(true)}>
+    <motion.div ref={shellRef} className={`player-shell ${pauseCinema ? "player-pause-cinema" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseMove={() => setControls(true)}>
       <video
         ref={videoRef}
         className="player-video"
+        style={{ objectFit: videoFit }}
         playsInline
         autoPlay
         x-webkit-airplay="allow"
-        onPlay={() => setPlaying(true)}
+        onPlay={() => { setPlaying(true); setPauseCinema(false); }}
         onPause={() => { setPlaying(false); report(true); }}
-        onTimeUpdate={(event) => { setPosition(event.currentTarget.currentTime); syncSubtitleCue(); report(); }}
+        onTimeUpdate={(event) => { positionRef.current = event.currentTarget.currentTime; setPosition(event.currentTarget.currentTime); syncSubtitleCue(); report(); }}
         onDurationChange={(event) => setDuration(event.currentTarget.duration)}
-        onVolumeChange={(event) => setMuted(event.currentTarget.muted)}
-        onSeeked={() => { syncSubtitleCue(); report(true); }}
+        onVolumeChange={(event) => {
+          setMuted(event.currentTarget.muted);
+          playbackPrefs.current = { ...playbackPrefs.current, muted: event.currentTarget.muted, volume: event.currentTarget.volume };
+          localStorage.setItem(playbackPrefsKey, JSON.stringify(playbackPrefs.current));
+        }}
+        onSeeked={() => { positionRef.current = videoRef.current?.currentTime ?? positionRef.current; syncSubtitleCue(); report(true); }}
         onClick={(event) => event.currentTarget.paused ? void event.currentTarget.play() : event.currentTarget.pause()}
       />
-      {cue && <div className="subtitle-layer" style={{ bottom: `${captions.offset}%`, fontFamily: captions.fontFamily, fontSize: `clamp(${18 * captions.fontSize / 100}px, ${2.1 * captions.fontSize / 100}vw, ${48 * captions.fontSize / 100}px)`, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px` }}><span style={{ background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>{cue}</span></div>}
+      <AnimatePresence>
+        {pauseCinema && (
+          <motion.div className="pause-cinema" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .65, ease: [0.22, 1, 0.36, 1] }}>
+            <motion.div className="pause-cinema-art" style={{ backgroundImage: `url(${imageUrl(item, item.BackdropImageTags?.length ? "Backdrop" : "Primary", 1800)})` }} initial={{ scale: 1.055 }} animate={{ scale: 1.02 }} transition={{ duration: 1.1, ease: "easeOut" }} />
+            <div className="pause-cinema-shade" />
+            <motion.div className="pause-cinema-copy" initial={{ opacity: 0, x: -28, y: -18 }} animate={{ opacity: 1, x: 0, y: 0 }} transition={{ delay: .18, duration: .62, ease: [0.22, 1, 0.36, 1] }}>
+              <div className="pause-cinema-heading">
+                <motion.h1 layoutId={`player-title-${item.Id}`}>{item.SeriesName ?? item.Name}</motion.h1>
+                {yearLabel && <span>{yearLabel}</span>}
+              </div>
+              {item.SeriesName && <h2>{item.Name}</h2>}
+              {item.Overview && <p>{item.Overview}</p>}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {cue && <div key={subtitleRenderEpoch} data-render-epoch={subtitleRenderEpoch} className="subtitle-layer" style={{ bottom: `${captions.offset}%`, fontFamily: captions.fontFamily, fontSize: `clamp(${18 * captions.fontSize / 100}px, ${2.1 * captions.fontSize / 100}vw, ${48 * captions.fontSize / 100}px)`, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px` }}><span style={{ background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>{cue}</span></div>}
       <div className="player-vignette" />
       <AnimatePresence>
         {controls && (
           <motion.div className="player-controls" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseLeave={() => playing && setTimeout(() => setControls(false), 1200)}>
-            <div className="player-top"><button className="player-icon" onClick={onClose}><X /></button><div><strong>{item.SeriesName ?? item.Name}</strong>{item.SeriesName && <span>{item.Name}</span>}</div></div>
-            <div className="player-center">
+            <div className="player-top"><button className="player-icon" aria-label="Close player" onClick={closePlayer}><X /></button>{!pauseCinema && <div><div className="player-title-line"><motion.strong layoutId={`player-title-${item.Id}`}>{item.SeriesName ?? item.Name}</motion.strong>{yearLabel && <small>{yearLabel}</small>}</div>{item.SeriesName && <span>{item.Name}</span>}</div>}</div>
+            {!pauseCinema && <div className="player-center">
               <button onClick={() => { if (videoRef.current) videoRef.current.currentTime -= 10; }}><RotateCcw /><span>10</span></button>
               <button className="play-main" onClick={() => videoRef.current?.paused ? void videoRef.current?.play() : videoRef.current?.pause()}>{playing ? <Pause /> : <Play />}</button>
               <button onClick={() => { if (videoRef.current) videoRef.current.currentTime += 10; }}><RotateCw /><span>10</span></button>
-            </div>
+            </div>}
             <div className="player-bottom">
               <div
                 className="seek-wrap"
@@ -286,12 +492,14 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
                 <input className="seek" aria-label="Seek video" type="range" min={0} max={duration || 1} step="0.1" value={position} onChange={(event) => { if (videoRef.current) videoRef.current.currentTime = Number(event.target.value); }} />
               </div>
               <div className="player-row">
+                <button className="player-icon player-bar-play" aria-label={playing ? "Pause" : "Play"} onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()}>{playing ? <Pause /> : <Play />}</button>
                 <button className="player-icon" onClick={() => { if (videoRef.current) videoRef.current.muted = !videoRef.current.muted; }}>{muted ? <VolumeX /> : <Volume2 />}</button>
                 <span className="timecode">{formatTime(position)} / {formatTime(duration)}</span>
                 <span className="player-spacer" />
-                {subtitles.length > 0 && <button className="player-icon" aria-label="Subtitle settings" onClick={() => setSettings(true)}><Captions /></button>}
+                {item.SeriesId && <button className="player-icon" aria-label="Choose episode" onClick={() => setSettings("episodes")}><ListVideo /></button>}
+                {subtitles.length > 0 && <button className="player-icon" aria-label="Subtitle settings" onClick={() => setSettings("captions")}><Captions /></button>}
                 <button className="player-icon" aria-label="AirPlay" onClick={() => videoRef.current?.webkitShowPlaybackTargetPicker?.()}><Airplay /></button>
-                <button className="player-icon" aria-label="Playback settings" onClick={() => setSettings(true)}><Settings2 /></button>
+                <button className="player-icon" aria-label="Playback settings" onClick={() => setSettings("playback")}><Settings2 /></button>
                 <button className="player-icon" aria-label="Enter fullscreen" onClick={toggleFullscreen}><Expand /></button>
               </div>
             </div>
@@ -299,16 +507,39 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
         )}
       </AnimatePresence>
       {error && <div className="player-error">{error}</div>}
-      <Modal open={settings} title="Playback & subtitles" onClose={() => setSettings(false)}>
-        <div className="player-settings">
-          <label><span>Subtitle track</span><select value={subtitleIndex ?? ""} onChange={(event) => chooseSubtitle(event.target.value === "" ? null : Number(event.target.value))}><option value="">Off</option>{subtitles.map((stream) => <option key={stream.Index} value={stream.Index}>{subtitleTrackLabel(stream)}</option>)}</select></label>
+      <Modal open={settings === "captions"} title="Subtitles" onClose={() => setSettings(null)}>
+        <div className="player-settings player-settings-polished">
+          <div className="settings-intro"><Captions /><div><strong>Caption appearance</strong><span>Saved automatically on this device</span></div></div>
+          <label className="settings-select"><span>Subtitle track</span><select value={subtitleIndex ?? ""} onChange={(event) => chooseSubtitle(event.target.value === "" ? null : Number(event.target.value))}><option value="">Off</option>{subtitles.map((stream) => <option key={stream.Index} value={stream.Index}>{subtitleTrackLabel(stream)}</option>)}</select></label>
           <label><span>Subtitle font</span><select value={captions.fontFamily} onChange={(event) => setCaptions({ ...captions, fontFamily: event.target.value })}>{captionFonts.map((font) => <option key={font.label} value={font.value} style={{ fontFamily: font.value }}>{font.label}</option>)}</select></label>
-          <label><span>Text size — {captions.fontSize}%</span><input type="range" min="75" max="200" value={captions.fontSize} onChange={(event) => setCaptions({ ...captions, fontSize: Number(event.target.value) })} /></label>
+          <label><span>Text size <b>{captions.fontSize}%</b></span><input type="range" min="0" max="200" value={captions.fontSize} onChange={(event) => setCaptions({ ...captions, fontSize: captionFontSize(Number(event.target.value)) })} /></label>
           <label><span>Line height — {captions.lineHeight.toFixed(2)}</span><input type="range" min="1" max="2" step="0.05" value={captions.lineHeight} onChange={(event) => setCaptions({ ...captions, lineHeight: Number(event.target.value) })} /></label>
           <label><span>Letter spacing — {captions.letterSpacing}px</span><input type="range" min="-2" max="8" step="0.25" value={captions.letterSpacing} onChange={(event) => setCaptions({ ...captions, letterSpacing: Number(event.target.value) })} /></label>
           <label><span>Vertical offset — {captions.offset}%</span><input type="range" min="-10" max="30" value={captions.offset} onChange={(event) => setCaptions({ ...captions, offset: Number(event.target.value) })} /></label>
-          <label><span>Background — {Math.round(captions.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step="0.05" value={captions.backgroundOpacity} onChange={(event) => setCaptions({ ...captions, backgroundOpacity: Number(event.target.value) })} /></label>
-          <Button variant="secondary" onClick={() => setSettings(false)}>Done</Button>
+          <label><span>Background opacity — {Math.round(captions.backgroundOpacity * 100)}%</span><input type="range" min="0" max="1" step="0.05" value={captions.backgroundOpacity} onChange={(event) => setCaptions({ ...captions, backgroundOpacity: Number(event.target.value) })} /></label>
+          <div className="settings-actions"><Button variant="ghost" onClick={() => setCaptions(defaultCaptions)}>Reset</Button><Button variant="secondary" onClick={() => setSettings(null)}>Done</Button></div>
+        </div>
+      </Modal>
+      <Modal open={settings === "playback"} title="Settings" onClose={() => setSettings(null)}>
+        <div className="player-settings player-settings-polished">
+          <div className="settings-intro"><SlidersHorizontal /><div><strong>Playback</strong><span>Picture and motion controls</span></div></div>
+          <div className="settings-speed"><span>Playback speed</span><div>{[.5, .75, 1, 1.25, 1.5, 2].map((rate) => <button key={rate} className={playbackRate === rate ? "active" : ""} onClick={() => setPlaybackRate(rate)}>{rate}×</button>)}</div></div>
+          <div className="settings-choice"><span>Picture fit</span><div><button className={videoFit === "contain" ? "active" : ""} onClick={() => setVideoFit("contain")}>Fit</button><button className={videoFit === "cover" ? "active" : ""} onClick={() => setVideoFit("cover")}>Fill</button></div></div>
+          <label><span>Volume <b>{Math.round((videoRef.current?.volume ?? playbackPrefs.current.volume) * 100)}%</b></span><input type="range" min="0" max="1" step="0.01" defaultValue={playbackPrefs.current.volume} onChange={(event) => { if (videoRef.current) { videoRef.current.volume = Number(event.target.value); videoRef.current.muted = false; } }} /></label>
+          <button className="stats-toggle" onClick={() => setStatsOpen((open) => !open)} aria-expanded={statsOpen}>Stats for nerds <span>{statsOpen ? "Hide" : "Show"}</span></button>
+          {statsOpen && <div className="stats-panel">{playbackStats.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
+          <div className="settings-actions"><Button variant="secondary" onClick={() => setSettings(null)}>Done</Button></div>
+        </div>
+      </Modal>
+      <Modal open={settings === "episodes"} title={item.SeriesName ? `${item.SeriesName} episodes` : "Episodes"} onClose={() => setSettings(null)}>
+        <div className="player-episode-picker">
+          {seriesEpisodes.length ? seriesEpisodes.map((episode) => (
+            <button key={episode.Id} className={episode.Id === item.Id ? "active" : ""} onClick={() => playEpisode(episode)}>
+              <span>EPISODE {episode.IndexNumber ?? "—"}</span>
+              <strong>{episode.Name}</strong>
+              {episode.Id === item.Id && <small>Now playing</small>}
+            </button>
+          )) : <div className="episode-status">No episodes available.</div>}
         </div>
       </Modal>
     </motion.div>
