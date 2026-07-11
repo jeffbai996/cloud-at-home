@@ -29,6 +29,28 @@ export function activeCueText(cues: ArrayLike<{ text: string }> | null): string 
     .join("\n");
 }
 
+const subtitleLanguages: Record<string, string> = {
+  chi: "Chinese",
+  eng: "English",
+  en: "English",
+  zh: "Chinese",
+  zho: "Chinese",
+};
+
+function usableMetadata(value?: string): string | null {
+  const normalized = value?.trim();
+  if (!normalized || /^(undefined|null|unknown)$/i.test(normalized)) return null;
+  return normalized;
+}
+
+export function subtitleTrackLabel(stream: { Index: number; DisplayTitle?: string; Language?: string }): string {
+  const title = usableMetadata(stream.DisplayTitle);
+  if (title) return title;
+  const language = usableMetadata(stream.Language);
+  if (language) return subtitleLanguages[language.toLowerCase()] ?? language.toUpperCase();
+  return `Subtitle ${stream.Index}`;
+}
+
 export type TrickplayInfo = {
   Width: number;
   Height: number;

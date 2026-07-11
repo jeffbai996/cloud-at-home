@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeCueText, progressEvents, resumePosition, shouldReportProgress, trickplayFrame } from "./playback";
+import { activeCueText, progressEvents, resumePosition, shouldReportProgress, subtitleTrackLabel, trickplayFrame } from "./playback";
 
 describe("playback progress", () => {
   it("reports every five seconds while playing", () => {
@@ -42,6 +42,14 @@ describe("subtitle cues", () => {
     expect(activeCueText([{ text: "<i>Hello</i>" }, { text: "world" }])).toBe("Hello\nworld");
     expect(activeCueText([])).toBe("");
     expect(activeCueText(null)).toBe("");
+  });
+
+  it("builds useful labels when subtitle metadata is missing or malformed", () => {
+    expect(subtitleTrackLabel({ Index: 2, DisplayTitle: "English - SDH", Language: "eng" })).toBe("English - SDH");
+    expect(subtitleTrackLabel({ Index: 3, DisplayTitle: "undefined", Language: "chi" })).toBe("Chinese");
+    expect(subtitleTrackLabel({ Index: 4, DisplayTitle: " null ", Language: "zho" })).toBe("Chinese");
+    expect(subtitleTrackLabel({ Index: 5, DisplayTitle: "", Language: "eng" })).toBe("English");
+    expect(subtitleTrackLabel({ Index: 6 })).toBe("Subtitle 6");
   });
 });
 

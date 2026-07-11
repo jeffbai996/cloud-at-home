@@ -18,7 +18,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { Button, Modal } from "@cloud-at-home/ui";
 import { createStreamTicket, getPlaybackInfo, reportPlayback, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
-import { activeCueText, resumePosition, shouldReportProgress, trickplayFrame, type TrickplayInfo } from "./playback";
+import { activeCueText, resumePosition, shouldReportProgress, subtitleTrackLabel, trickplayFrame, type TrickplayInfo } from "./playback";
 
 type SafariVideo = HTMLVideoElement & {
   webkitShowPlaybackTargetPicker?: () => void;
@@ -35,6 +35,7 @@ type SafariFullscreenDocument = Document & {
 };
 
 type CaptionPrefs = {
+  fontFamily: string;
   fontSize: number;
   lineHeight: number;
   letterSpacing: number;
@@ -42,7 +43,15 @@ type CaptionPrefs = {
   backgroundOpacity: number;
 };
 
-const defaultCaptions: CaptionPrefs = { fontSize: 115, lineHeight: 1.25, letterSpacing: 0, offset: 8, backgroundOpacity: 0.72 };
+const captionFonts = [
+  { label: "Plus Jakarta Sans", value: '"Plus Jakarta Sans", sans-serif' },
+  { label: "Inter", value: "Inter, sans-serif" },
+  { label: "System Sans", value: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
+  { label: "Classic Serif", value: 'Georgia, "Times New Roman", serif' },
+  { label: "Monospace", value: '"SFMono-Regular", Consolas, "Liberation Mono", monospace' },
+] as const;
+
+const defaultCaptions: CaptionPrefs = { fontFamily: captionFonts[0].value, fontSize: 115, lineHeight: 1.25, letterSpacing: 0, offset: 8, backgroundOpacity: 0.72 };
 
 export function Player({ item, session, onClose }: { item: MediaItem; session: Session; onClose: () => void }) {
   const shellRef = useRef<SafariFullscreenElement>(null);
@@ -247,7 +256,7 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
         onSeeked={() => { syncSubtitleCue(); report(true); }}
         onClick={(event) => event.currentTarget.paused ? void event.currentTarget.play() : event.currentTarget.pause()}
       />
-      {cue && <div className="subtitle-layer" style={{ bottom: `${captions.offset}%`, fontSize: `clamp(${18 * captions.fontSize / 100}px, ${2.1 * captions.fontSize / 100}vw, ${48 * captions.fontSize / 100}px)`, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px` }}><span style={{ background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>{cue}</span></div>}
+      {cue && <div className="subtitle-layer" style={{ bottom: `${captions.offset}%`, fontFamily: captions.fontFamily, fontSize: `clamp(${18 * captions.fontSize / 100}px, ${2.1 * captions.fontSize / 100}vw, ${48 * captions.fontSize / 100}px)`, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px` }}><span style={{ background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>{cue}</span></div>}
       <div className="player-vignette" />
       <AnimatePresence>
         {controls && (
@@ -292,7 +301,8 @@ export function Player({ item, session, onClose }: { item: MediaItem; session: S
       {error && <div className="player-error">{error}</div>}
       <Modal open={settings} title="Playback & subtitles" onClose={() => setSettings(false)}>
         <div className="player-settings">
-          <label><span>Subtitle track</span><select value={subtitleIndex ?? ""} onChange={(event) => chooseSubtitle(event.target.value === "" ? null : Number(event.target.value))}><option value="">Off</option>{subtitles.map((stream) => <option key={stream.Index} value={stream.Index}>{stream.DisplayTitle ?? stream.Language ?? `Track ${stream.Index}`}</option>)}</select></label>
+          <label><span>Subtitle track</span><select value={subtitleIndex ?? ""} onChange={(event) => chooseSubtitle(event.target.value === "" ? null : Number(event.target.value))}><option value="">Off</option>{subtitles.map((stream) => <option key={stream.Index} value={stream.Index}>{subtitleTrackLabel(stream)}</option>)}</select></label>
+          <label><span>Subtitle font</span><select value={captions.fontFamily} onChange={(event) => setCaptions({ ...captions, fontFamily: event.target.value })}>{captionFonts.map((font) => <option key={font.label} value={font.value} style={{ fontFamily: font.value }}>{font.label}</option>)}</select></label>
           <label><span>Text size — {captions.fontSize}%</span><input type="range" min="75" max="200" value={captions.fontSize} onChange={(event) => setCaptions({ ...captions, fontSize: Number(event.target.value) })} /></label>
           <label><span>Line height — {captions.lineHeight.toFixed(2)}</span><input type="range" min="1" max="2" step="0.05" value={captions.lineHeight} onChange={(event) => setCaptions({ ...captions, lineHeight: Number(event.target.value) })} /></label>
           <label><span>Letter spacing — {captions.letterSpacing}px</span><input type="range" min="-2" max="8" step="0.25" value={captions.letterSpacing} onChange={(event) => setCaptions({ ...captions, letterSpacing: Number(event.target.value) })} /></label>

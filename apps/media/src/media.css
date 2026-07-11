@@ -113,7 +113,7 @@
 .seek-thumbnail-fallback { height: 118px; background-position: center 24%; background-size: cover; }
 .timecode { font-variant-numeric: tabular-nums; color: rgba(255,255,255,.68); font-size: 12px; }
 .player-spacer { flex: 1; }
-.subtitle-layer { position: absolute; z-index: 5; left: 10%; right: 10%; text-align: center; white-space: pre-line; font-family: Inter, sans-serif; font-weight: 600; text-shadow: 0 2px 4px #000, 0 0 2px #000; pointer-events: none; }
+.subtitle-layer { position: absolute; z-index: 5; left: 10%; right: 10%; text-align: center; white-space: pre-line; font-weight: 600; text-shadow: 0 2px 4px #000, 0 0 2px #000; pointer-events: none; }
 .player-shell:fullscreen .subtitle-layer, .player-shell:-webkit-full-screen .subtitle-layer { position: fixed; z-index: 20; }
 .subtitle-layer span { padding: .08em .26em .14em; border-radius: .18em; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .player-error { position: absolute; top: 20px; left: 50%; z-index: 10; transform: translateX(-50%); padding: 10px 14px; border-radius: 10px; background: rgba(150,20,20,.85); }
