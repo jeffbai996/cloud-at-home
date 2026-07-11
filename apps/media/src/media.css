@@ -176,10 +176,11 @@
 .details-facts .rating-badge-hex { position: relative; width: 36px; min-width: 36px; height: 34px; border: 0; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); background: rgba(255,255,255,.78); box-shadow: none; letter-spacing: 0; }
 .details-facts .rating-badge-hex::before { content: ""; position: absolute; inset: 1.6px; clip-path: inherit; background: var(--rating-fill); }
 .details-facts .rating-badge-hex > * { position: relative; z-index: 1; }
-.details-facts .rating-badge-triangle { position: relative; width: 41px; min-width: 41px; height: 38px; border: 0; background: transparent; box-shadow: none; font-size: 13.5px; }
+.details-facts .rating-badge-triangle { position: relative; width: 42px; min-width: 42px; height: 39px; border: 0; background: transparent; box-shadow: none; font-family: "DM Sans", sans-serif; font-size: 12.5px; font-weight: 700; }
 .details-facts .rating-badge-triangle::before { content: ""; position: absolute; inset: 1px; background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 39 36'%3E%3Cpath d='M4 3 Q2 3 3.5 6 L17.4 31 Q19.5 34 21.6 31 L35.5 6 Q37 3 34 3 Z' fill='%23e57220' stroke='%23ffc994' stroke-width='1.25' stroke-linejoin='round'/%3E%3C/svg%3E"); filter: drop-shadow(0 5px 7px rgba(0,0,0,.22)); }
-.details-facts .rating-badge-triangle .rating-badge-content { transform: translateY(-2px); }
-.details-facts .rating-badge-triangle .rating-badge-accompaniment { align-self: auto; margin: 0 0 0 .75px; font-size: .66em; transform: translateY(-3px); }
+.details-facts .rating-badge-triangle .rating-badge-content { transform: translateY(-4px); }
+.details-facts .rating-badge-triangle .rating-badge-base { transform: none; }
+.details-facts .rating-badge-triangle .rating-badge-accompaniment { align-self: auto; margin: 0 0 0 .6px; font-size: .64em; font-weight: 700; transform: translateY(-2.75px); }
 .details-facts .rating-badge-octagon { clip-path: polygon(29% 0, 71% 0, 100% 29%, 100% 71%, 71% 100%, 29% 100%, 0 71%, 0 29%); }
 .details-facts .rating-badge-green { --rating-edge: #b7f4cc; background: #169b50; color: #fff; border-width: 1.25px; }
 .details-facts .rating-badge-yellow { --rating-edge: #fff0a0; background: #ffd235; color: #231b00; }
