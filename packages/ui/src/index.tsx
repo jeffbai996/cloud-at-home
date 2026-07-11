@@ -3,6 +3,7 @@ import {
   Bot,
   Check,
   Clapperboard,
+  Cloud,
   Database,
   Files,
   Moon,
@@ -23,7 +24,7 @@ type ServiceKind = AppKind | "extra";
 
 const apps = [
   { id: "media" as const, label: "Cloud Media", icon: Play, localPort: 8090, tailnetPort: 8453 },
-  { id: "files" as const, label: "Cloud Files", icon: Files, localPort: 8082, tailnetPort: 8454 },
+  { id: "files" as const, label: "Drive", icon: Files, localPort: 8082, tailnetPort: 8454 },
   { id: "ai" as const, label: "Local AI", icon: Bot, localPort: 3003, tailnetPort: 8445 },
 ];
 
@@ -85,7 +86,7 @@ export function AppSwitcher({
 
 function CloudMark() {
   return (
-    <svg className="cloud-home-cloud-mark" width="22" height="22" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+    <svg className="cloud-cloud-mark" width="22" height="22" viewBox="0 0 100 100" fill="none" aria-hidden="true">
       <path d="M78 55a18 18 0 0 0-35.5-4.5A14 14 0 1 0 44 78h34a14 14 0 0 0 0-23z" stroke="currentColor" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -128,6 +129,7 @@ export function AppShell({
   actions,
   navigation,
   urls,
+  headerCollapsed = false,
 }: {
   kind: AppKind;
   brand: string;
@@ -135,10 +137,11 @@ export function AppShell({
   actions?: ReactNode;
   navigation?: ReactNode;
   urls?: Partial<Record<ServiceKind, string>>;
+  headerCollapsed?: boolean;
 }) {
-  const BrandIcon = kind === "media" ? Clapperboard : Sparkles;
+  const BrandIcon = kind === "media" ? Clapperboard : kind === "files" ? Cloud : Sparkles;
   return (
-    <div className={`app app-${kind}`}>
+    <div className={`app app-${kind} ${headerCollapsed ? "app-header-collapsed" : ""}`}>
       <header className="topbar">
         <div className="topbar-left">
           <a href="/" className="brand">
@@ -186,11 +189,11 @@ export function LoginView({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: "spring", stiffness: 260, damping: 24 }}
       >
-        <div className="login-orb"><Sparkles size={26} /></div>
+        <div className="login-orb">{service.includes("Cloud") ? <Cloud size={27} /> : <Sparkles size={26} />}</div>
         <div>
-          <div className="eyebrow">Cloud Files</div>
+          <div className="eyebrow">Secure personal storage</div>
           <h1>Sign in to {service}</h1>
-          <p>Your existing account, minus the existing interface.</p>
+          <p>{service.includes("Cloud") ? "Your files, tools, and shared spaces—available from one private drive." : "Your existing account, minus the existing interface."}</p>
         </div>
         <label>
           <span>Username</span>

@@ -70,13 +70,19 @@ button { color: inherit; }
 .app-glyph-media { background: var(--orange); }
 .app-glyph-extra { background: #63d6ff; }
 .app-media { --app-accent: var(--orange); }
-.app-files { --app-accent: var(--violet); }
+.app-files { --blue: #208cff; --blue-bright: #55aaff; --green: var(--blue); --violet: var(--blue); --app-accent: var(--blue); }
+.app-files::before { background: linear-gradient(180deg, rgba(5,12,22,.34), rgba(5,10,18,.78) 82%), radial-gradient(900px 520px at 16% -8%, rgba(32,140,255,.22), transparent 66%), radial-gradient(720px 440px at 92% 4%, rgba(72,180,255,.10), transparent 64%); }
+:root[data-theme="oled"] .app-files::before { background: linear-gradient(180deg, rgba(0,4,10,.62), rgba(0,2,6,.92) 82%), radial-gradient(900px 520px at 16% -8%, rgba(32,140,255,.16), transparent 66%); }
+.app-files .brand { gap: 12px; font-size: 20px; font-weight: 750; letter-spacing: -.04em; }
+.app-files .brand-mark-files, .app-files .app-glyph-files { color: #fff; background: linear-gradient(145deg, var(--blue-bright), var(--blue)); box-shadow: inset 0 1px rgba(255,255,255,.35), 0 9px 30px rgba(32,140,255,.24); }
+.app-files .brand-mark-files { width: 36px; height: 36px; border-radius: 12px; }
+.app-files .brand-mark-files svg { width: 20px; height: 20px; }
 .app-ai { --app-accent: var(--pink); }
 .icon-button { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 11px; background: transparent; color: var(--text-2); cursor: pointer; transition: .18s ease; }
 .icon-button:hover, .icon-button[data-state="open"] { background: var(--surface-2); border-color: var(--line); color: var(--text); transform: translateY(-1px); }
 .icon-button > span { display: grid; }
 .app-switcher-trigger { width: 32px; border-color: transparent; border-radius: 0; background: transparent; color: #fff; }
-.cloud-home-cloud-mark { color: var(--text-2); transform: translate(-2px, -1px); }
+.cloud-cloud-mark { color: var(--text-2); transform: translate(-2px, -1px); }
 .app-switcher-trigger:hover, .app-switcher-trigger[data-state="open"] { border-color: transparent; background: transparent; color: var(--app-accent); transform: translateY(-1px) scale(1.06); }
 
 .dropdown { min-width: 220px; padding: 7px; border: 1px solid var(--line-strong); border-radius: 15px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(26px) saturate(150%); box-shadow: var(--shadow); animation: dropdown-in .16s ease-out; z-index: 100; }
@@ -87,7 +93,8 @@ button { color: inherit; }
 .app-switcher-menu-media { --menu-accent: var(--orange); }
 .app-switcher-menu-files { --menu-accent: var(--violet); }
 .app-switcher-menu-ai { --menu-accent: var(--pink); }
-.app-switcher-menu .dropdown-label, .app-switcher-menu .dropdown-check { color: var(--menu-accent); }
+.app-switcher-menu .dropdown-label { color: var(--muted); }
+.app-switcher-menu .dropdown-check { color: var(--menu-accent); }
 .app-switcher-menu .dropdown-item[data-active="true"] { background: color-mix(in srgb, var(--menu-accent) 11%, transparent); color: var(--text); }
 .dropdown-check { margin-left: auto; color: var(--green); }
 .dropdown-arrow { fill: var(--surface); }
@@ -109,6 +116,13 @@ label > span { display: block; margin: 0 0 7px; color: var(--text-2); font-size:
 .glass-panel { border: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(26px) saturate(140%); box-shadow: var(--shadow); }
 .login-stage { min-height: calc(100vh - var(--topbar)); display: grid; place-items: center; padding: 28px; background: radial-gradient(circle at 50% 48%, transparent 0, rgba(0,0,0,.34) 62%, rgba(0,0,0,.66) 100%); }
 .login-card { width: min(430px, 100%); display: grid; gap: 19px; padding: 30px; border-radius: var(--radius-lg); }
+.app-files .login-card { width: min(470px, 100%); gap: 21px; padding: 38px; border-color: rgba(85,170,255,.20); background: linear-gradient(160deg, rgba(23,31,43,.94), rgba(11,16,24,.92)); box-shadow: 0 28px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(32,140,255,.06); }
+.app-files .login-card label > span { font-size: 12.5px; }
+.app-files .login-card input { min-height: 48px; border-color: rgba(255,255,255,.12); background: rgba(5,10,17,.72); }
+.app-files .login-card .button { min-height: 48px; margin-top: 2px; color: #fff; }
+.app-files .button-primary { box-shadow: 0 10px 34px rgba(32,140,255,.20); }
+.app-files input:focus, .app-files textarea:focus, .app-files select:focus { box-shadow: 0 0 0 3px rgba(32,140,255,.13); }
+.app-files .login-orb { width: 56px; height: 56px; color: #fff; background: linear-gradient(145deg, var(--blue-bright), var(--blue)); box-shadow: 0 15px 55px rgba(32,140,255,.28); }
 .login-card h1 { margin: 4px 0 8px; font-family: "Plus Jakarta Sans", sans-serif; font-size: 27px; line-height: 1.1; letter-spacing: -.04em; }
 .login-card p { margin: 0; color: var(--muted); line-height: 1.5; }
 .login-orb { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 15px; color: #050505; background: linear-gradient(145deg, var(--green), #d3ff65); box-shadow: 0 12px 50px rgba(166,226,46,.16); }
