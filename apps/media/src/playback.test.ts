@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeCueText, captionFontSize, formatPlaybackStats, isResumable, mediaYearLabel, pauseCinemaVisible, playbackStartPosition, progressEvents, resumePosition, shouldReportProgress, subtitleTrackLabel, trickplayFrame, webPlaybackProfile } from "./playback";
+import { activeCueText, captionFontSize, captionVerticalOffset, formatPlaybackStats, isResumable, mediaYearLabel, pauseCinemaVisible, playbackStartPosition, progressEvents, resumePosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, webPlaybackProfile } from "./playback";
 
 describe("web playback capabilities", () => {
   it("direct-plays browser-safe video and transcodes incompatible containers or audio to HLS", () => {
@@ -16,6 +16,13 @@ describe("web playback capabilities", () => {
       AudioCodec: "aac",
     }));
   });
+
+  it("delivers text subtitles externally instead of burning them into video", () => {
+    expect(webPlaybackProfile.SubtitleProfiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ Format: "srt", Method: "External" }),
+      expect.objectContaining({ Format: "vtt", Method: "External" }),
+    ]));
+  });
 });
 
 describe("player preferences", () => {
@@ -26,10 +33,30 @@ describe("player preferences", () => {
     expect(captionFontSize(260)).toBe(200);
   });
 
+  it("clamps caption vertical offset to 0-30 percent", () => {
+    expect(captionVerticalOffset(undefined)).toBe(8);
+    expect(captionVerticalOffset(-10)).toBe(0);
+    expect(captionVerticalOffset(12)).toBe(12);
+    expect(captionVerticalOffset(45)).toBe(30);
+  });
+
+  it("uses native video fullscreen only on iPhone and iPod", () => {
+    expect(usesNativeVideoFullscreen("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X)")).toBe(true);
+    expect(usesNativeVideoFullscreen("Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X)")).toBe(false);
+    expect(usesNativeVideoFullscreen("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")).toBe(false);
+  });
+
   it("enters pause cinema only after ten seconds and leaves immediately", () => {
     expect(pauseCinemaVisible(true, 9_999)).toBe(false);
     expect(pauseCinemaVisible(true, 10_000)).toBe(true);
     expect(pauseCinemaVisible(false, 30_000)).toBe(false);
+  });
+
+  it("enters picture in picture only for actively playing, loaded video", () => {
+    expect(shouldAutoPictureInPicture(false, false, 2)).toBe(true);
+    expect(shouldAutoPictureInPicture(true, false, 4)).toBe(false);
+    expect(shouldAutoPictureInPicture(false, true, 4)).toBe(false);
+    expect(shouldAutoPictureInPicture(false, false, 1)).toBe(false);
   });
 
   it("formats real playback diagnostics without inventing unavailable values", () => {
@@ -123,7 +150,12 @@ describe("subtitle cues", () => {
   it("removes implementation details from track labels", () => {
     expect(subtitleTrackLabel({ Index: 3, DisplayTitle: "English - SUBRIP - External" })).toBe("English");
     expect(subtitleTrackLabel({ Index: 4, DisplayTitle: "Chinese Simplified | SRT | External" })).toBe("Chinese Simplified");
-    expect(subtitleTrackLabel({ Index: 5, Language: "eng" })).toBe("English");
+    expect(subtitleTrackLabel({ Index: 5, Language: "eng" })).toBe("eng");
+  });
+
+  it("replaces Jellyfin's undefined language placeholder with a human label", () => {
+    expect(subtitleTrackLabel({ Index: 0, DisplayTitle: "Undefined - SUBRIP - External" })).toBe("Subtitle track 1");
+    expect(subtitleTrackLabel({ Index: 2, Language: "und" })).toBe("Subtitle track 3");
   });
 });
 
