@@ -1,7 +1,7 @@
 export type RatingBadge = {
   label: string;
   scheme: "ca" | "ca-tv" | "us-tv" | "us-film" | "plain";
-  shape: "circle" | "rounded" | "hex" | "diamond" | "octagon" | "plaque";
+  shape: "circle" | "rounded" | "hex" | "triangle" | "octagon" | "plaque";
   tone: "green" | "yellow" | "orange" | "blue" | "red" | "mono";
   ariaLabel: string;
   name: string;
@@ -62,7 +62,7 @@ const canadianShapes: Record<string, RatingBadge["shape"]> = {
   G: "circle",
   PG: "rounded",
   "14A": "hex",
-  "18A": "diamond",
+  "18A": "triangle",
   R: "circle",
   A: "circle",
 };
