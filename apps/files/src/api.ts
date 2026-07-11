@@ -50,6 +50,11 @@ export async function login(username: string, password: string): Promise<Session
   return session;
 }
 
+export async function logout(): Promise<void> {
+  await request("/api/auth/files/session", { method: "DELETE" });
+  csrf = "";
+}
+
 function encodedPath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
@@ -67,12 +72,16 @@ export async function getText(path: string): Promise<{ text: string; etag: strin
   return { text: await response.text(), etag: response.headers.get("ETag"), modified: response.headers.get("Last-Modified") };
 }
 
-export async function saveText(path: string, text: string): Promise<void> {
-  await request(`/api/files/proxy/resources${encodedPath(path)}`, { method: "PUT", body: text }, false);
+export async function saveText(path: string, text: string, etag?: string | null): Promise<{ etag: string | null; modified: string | null }> {
+  const headers = new Headers();
+  if (etag) headers.set("If-Match", etag);
+  const response = await request(`/api/files/proxy/resources${encodedPath(path)}`, { method: "PUT", body: text, headers }, false) as Response;
+  return { etag: response.headers.get("ETag") ?? etag ?? null, modified: response.headers.get("Last-Modified") };
 }
 
 export async function createResource(path: string, directory: boolean): Promise<void> {
-  await request(`/api/files/proxy/resources${encodedPath(path)}${directory ? "/" : ""}`, { method: "PUT", body: "" }, false);
+  const target = `${encodedPath(path)}${directory ? "/" : ""}`;
+  await request(`/api/files/proxy/resources${target}?override=false`, { method: "POST", body: "" }, false);
 }
 
 export async function transformResource(from: string, to: string, copy: boolean): Promise<void> {
@@ -112,6 +121,28 @@ export async function purgeTrash(id: string): Promise<void> {
 
 export async function adminResource<T>(path: string, options: RequestInit = {}): Promise<T> {
   return request(`/api/files/proxy/${path}`, options) as Promise<T>;
+}
+
+export async function createUser(username: string, password: string, admin: boolean): Promise<void> {
+  await adminResource("users", {
+    method: "POST",
+    body: JSON.stringify({
+      username,
+      password,
+      scope: "/",
+      locale: "en",
+      viewMode: "mosaic",
+      singleClick: false,
+      perm: { admin, execute: false, create: true, rename: true, modify: true, delete: true, share: true, download: true },
+      commands: [],
+      lockPassword: false,
+      hideDotfiles: false,
+    }),
+  });
+}
+
+export async function deleteUser(id: number): Promise<void> {
+  await request(`/api/files/proxy/users/${id}`, { method: "DELETE" }, false);
 }
 
 export async function getStorageUsage(): Promise<StorageUsage> {
