@@ -28,16 +28,24 @@ hostnames, routes, and configuration are never included in the repository.
 
 ![Cloud Media streaming interface demo](docs/images/cloud-media-demo.png)
 
+*Browse and play a media library from the responsive Cloud Media interface.*
+
 Browse, search, and play movies and television from a responsive streaming interface.
 The current client includes type-ahead title search, favorites and named lists,
 watch-history controls, series navigation, metadata ratings, configurable
 captions, playback diagnostics, and desktop/iOS-oriented player behaviour.
 
+---
+
 ### Cloud Drive
 
 ![Cloud Files file-management interface demo](docs/images/cloud-files-demo.png)
 
+*Manage files from the Finder-style Cloud Drive interface.*
+
 Browse, preview, edit, transfer, and recover files from a Finder-style interface.
+
+---
 
 ### Home server deployment
 
@@ -104,10 +112,3 @@ belong in ignored runtime state or a separate private deployment checkout.
 - expanded subtitle styling, playback diagnostics, seek previews, iOS playback
   handling, pause-state presentation, and player control behaviour
 - tightened responsive card rails, artwork rendering, and detail layouts
-
-## Public-source safety
-
-The repository uses neutral product names and must not inherit deployment-only
-branding, hostnames, URLs, credentials, or personal data. Run
-`npm run check:public` before committing; the same check runs in CI and as part
-of `npm test`.
