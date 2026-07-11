@@ -549,6 +549,7 @@ function OfficialRating({ value }: { value: string }) {
 function RatingBadgeLabel({ scheme, label }: { scheme: string; label: string }) {
   const accompaniment = scheme === "ca" && /^(14|18)A$/.exec(label);
   if (!accompaniment) return <>{label}</>;
+  if (accompaniment[1] === "14") return <><span className="rating-badge-base">14</span><sup className="rating-badge-accompaniment">A</sup></>;
   return <span className="rating-badge-content"><span className="rating-badge-base">{accompaniment[1]}</span><sup className="rating-badge-accompaniment">A</sup></span>;
 }
 
