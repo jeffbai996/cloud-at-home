@@ -13,20 +13,25 @@
 
 Private-first, self-hosted cloud applications backed by established services:
 
-- **Cloud Media** — movies and television through Jellyfin
+- **Cloud Media** — a custom Jellyfin client with profiles, resume history, responsive playback, configurable subtitles, favorites, named lists, and library search
 - **Cloud Drive** — Finder-style FileBrowser client with Monaco editing, previews, transfers, user controls, and recoverable trash
 - **Service switcher** — navigation between media, files, local AI, and optional runtime-configured services
 - **Gateway** — encrypted upstream sessions, scoped proxy policies, preferences, playback tickets, and trash metadata
 
 ## Preview
 
-The screenshots are generic v0.2 product mockups; no private deployment data is included.
+The interface previews below combine generic product captures with clearly
+labelled images from a real home-server deployment. Runtime credentials,
+hostnames, routes, and configuration are never included in the repository.
 
 ### Cloud Media
 
 ![Cloud Media streaming interface demo](docs/images/cloud-media-demo.png)
 
 Browse, search, and play movies and television from a responsive streaming interface.
+The current client includes type-ahead title search, favorites and named lists,
+watch-history controls, series navigation, metadata ratings, configurable
+captions, playback diagnostics, and desktop/iOS-oriented player behaviour.
 
 ### Cloud Drive
 
@@ -89,6 +94,16 @@ belong in ignored runtime state or a separate private deployment checkout.
 - stronger session recovery, preference normalization, playback reporting, and
   FileBrowser 2.63-compatible resource mutations
 - substantially expanded unit, gateway, and desktop/iPad regression coverage
+
+### Since v0.2
+
+- replaced the single saved-items shelf with Favorites and user-named lists,
+  including a selectable list promoted into the navigation bar
+- added type-ahead title suggestions and clearer movie/TV library organization
+- refined classification, audience, and critic metadata presentation
+- expanded subtitle styling, playback diagnostics, seek previews, iOS playback
+  handling, pause-state presentation, and player control behaviour
+- tightened responsive card rails, artwork rendering, and detail layouts
 
 ## Public-source safety
 
