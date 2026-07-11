@@ -7,7 +7,7 @@ from cloud_gateway.preferences import DEFAULT_PREFERENCES, merge_preferences
 
 def test_preferences_default_to_noir_and_accessible_caption_values() -> None:
     assert DEFAULT_PREFERENCES["theme"] == "noir"
-    assert DEFAULT_PREFERENCES["captions"]["fontSize"] >= 100
+    assert DEFAULT_PREFERENCES["captions"]["fontSize"] == 75
     assert DEFAULT_PREFERENCES["captions"]["lineHeight"] >= 1
 
 

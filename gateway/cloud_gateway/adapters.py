@@ -92,13 +92,13 @@ class ServiceAdapter:
 class JellyfinAdapter(ServiceAdapter):
     client_header = (
         'MediaBrowser Client="Cloud at Home", Device="Web", '
-        'DeviceId="cloud-at-home-web", Version="0.1.0"'
+        'DeviceId="cloud-home-web", Version="0.1.0"'
     )
 
     def login(self, username: str, password: str) -> AuthResult:
         login_header = (
             'MediaBrowser Client="Cloud at Home", Device="Web", '
-            f'DeviceId="cloud-at-home-web-{uuid.uuid4().hex}", Version="0.1.0"'
+            f'DeviceId="cloud-home-web-{uuid.uuid4().hex}", Version="0.1.0"'
         )
         try:
             response = requests.post(

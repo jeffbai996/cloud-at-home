@@ -126,6 +126,25 @@ def test_state_changing_proxy_requires_csrf(tmp_path) -> None:
     assert response.status_code == 200
 
 
+def test_file_save_forwards_optimistic_concurrency_headers(tmp_path) -> None:
+    files = FakeAdapter()
+    app = _app(tmp_path, {"media": FakeAdapter(), "files": files})
+    client = app.test_client()
+    login = client.post(
+        "/api/auth/files/login",
+        json={"username": "alice", "password": "correct horse"},
+    )
+
+    response = client.put(
+        "/api/files/proxy/resources/notes.txt",
+        data="updated",
+        headers={"X-CSRF-Token": login.json["csrf"], "If-Match": '"example-etag"'},
+    )
+
+    assert response.status_code == 200
+    assert files.requests[-1]["headers"]["If-Match"] == '"example-etag"'
+
+
 def test_json_proxy_buffers_body_and_recalculates_content_length(tmp_path) -> None:
     media = FakeAdapter()
     app = _app(tmp_path, {"media": media, "files": FakeAdapter()})
@@ -146,6 +165,29 @@ def test_json_proxy_buffers_body_and_recalculates_content_length(tmp_path) -> No
     assert isinstance(forwarded["data"], bytes)
     assert forwarded["data"] == b'{"EnableDirectPlay": true, "UserId": "user-1"}'
     assert not any(key.lower() == "content-length" for key in forwarded["headers"])
+
+
+def test_stream_ticket_accepts_jellyfin_hyphenated_item_id(tmp_path) -> None:
+    media = FakeAdapter()
+    app = _app(tmp_path, {"media": media, "files": FakeAdapter()})
+    client = app.test_client()
+    login = client.post(
+        "/api/auth/media/login",
+        json={"username": "alice", "password": "correct horse"},
+    )
+    compact_id = "461ecbe3269ee48076526b2f9906adf0"
+    ticket = client.post(
+        "/api/media/tickets",
+        json={"itemId": compact_id},
+        headers={"X-CSRF-Token": login.json["csrf"]},
+    ).json["ticket"]
+
+    response = client.get(
+        f"/api/media/stream/{ticket}/Videos/461ecbe3-269e-e480-7652-6b2f9906adf0/master.m3u8",
+    )
+
+    assert response.status_code == 200
+    assert media.requests[-1]["path"].startswith("Videos/461ecbe3-269e-e480")
 
 
 def test_large_proxy_body_stays_streamed_with_content_length(tmp_path) -> None:
@@ -206,3 +248,27 @@ def test_listing_trash_purges_expired_upstream_entries(tmp_path) -> None:
     assert response.status_code == 200
     assert response.json == []
     assert store.get(entry.id, "user-1") is None
+
+
+def test_trash_uses_filebrowser_upload_endpoint_for_directories(tmp_path) -> None:
+    files = FakeAdapter()
+    app = _app(tmp_path, {"media": FakeAdapter(), "files": files})
+    client = app.test_client()
+    login = client.post(
+        "/api/auth/files/login",
+        json={"username": "alice", "password": "correct horse"},
+    )
+
+    response = client.post(
+        "/api/files/trash",
+        json={"path": "/notes.txt", "size": 12},
+        headers={"X-CSRF-Token": login.json["csrf"]},
+    )
+
+    assert response.status_code == 201
+    assert files.requests[0]["method"] == "POST"
+    assert files.requests[0]["path"] == "api/resources/.cloud-home-trash/?override=false"
+    assert files.requests[1]["method"] == "POST"
+    assert files.requests[1]["path"].startswith("api/resources/.cloud-home-trash/")
+    assert files.requests[1]["path"].endswith("/?override=false")
+    assert files.requests[2]["method"] == "PATCH"

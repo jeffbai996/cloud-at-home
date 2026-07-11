@@ -1,6 +1,61 @@
 import { describe, expect, it } from "vitest";
 
-import { activeCueText, progressEvents, resumePosition, shouldReportProgress, subtitleTrackLabel, trickplayFrame } from "./playback";
+import { activeCueText, captionFontSize, formatPlaybackStats, isResumable, mediaYearLabel, pauseCinemaVisible, playbackStartPosition, progressEvents, resumePosition, shouldReportProgress, subtitleTrackLabel, trickplayFrame, webPlaybackProfile } from "./playback";
+
+describe("web playback capabilities", () => {
+  it("direct-plays browser-safe video and transcodes incompatible containers or audio to HLS", () => {
+    expect(webPlaybackProfile.DirectPlayProfiles).toContainEqual(expect.objectContaining({
+      Container: "mp4,m4v",
+      VideoCodec: "h264",
+      AudioCodec: "aac,mp3,ac3",
+    }));
+    expect(webPlaybackProfile.DirectPlayProfiles.some((profile) => profile.Container.includes("mkv"))).toBe(false);
+    expect(webPlaybackProfile.TranscodingProfiles).toContainEqual(expect.objectContaining({
+      Protocol: "hls",
+      VideoCodec: "h264",
+      AudioCodec: "aac",
+    }));
+  });
+});
+
+describe("player preferences", () => {
+  it("defaults captions to 75 percent and clamps saved values to 0-200", () => {
+    expect(captionFontSize(undefined)).toBe(75);
+    expect(captionFontSize(-10)).toBe(0);
+    expect(captionFontSize(143)).toBe(143);
+    expect(captionFontSize(260)).toBe(200);
+  });
+
+  it("enters pause cinema only after ten seconds and leaves immediately", () => {
+    expect(pauseCinemaVisible(true, 9_999)).toBe(false);
+    expect(pauseCinemaVisible(true, 10_000)).toBe(true);
+    expect(pauseCinemaVisible(false, 30_000)).toBe(false);
+  });
+
+  it("formats real playback diagnostics without inventing unavailable values", () => {
+    expect(formatPlaybackStats({
+      width: 1920,
+      height: 1080,
+      mode: "Direct play",
+      container: "mkv",
+      videoCodec: "hevc",
+      audioCodec: "aac",
+      bufferedSeconds: 18.46,
+      droppedFrames: 3,
+      totalFrames: 2400,
+      rate: 1.25,
+    })).toEqual([
+      ["Resolution", "1920 × 1080"],
+      ["Playback", "Direct play"],
+      ["Container", "MKV"],
+      ["Video", "HEVC"],
+      ["Audio", "AAC"],
+      ["Buffer", "18.5 s"],
+      ["Frames", "3 dropped / 2,400"],
+      ["Speed", "1.25×"],
+    ]);
+  });
+});
 
 describe("playback progress", () => {
   it("reports every five seconds while playing", () => {
@@ -35,6 +90,27 @@ describe("resume position", () => {
   it("keeps the saved position when duration is not known yet", () => {
     expect(resumePosition(125, Number.NaN)).toBe(125);
   });
+
+  it("starts at zero when the user chooses play from beginning", () => {
+    expect(playbackStartPosition(125, 600, true)).toBe(0);
+    expect(playbackStartPosition(125, 600, false)).toBe(125);
+  });
+
+  it("offers resume only for unfinished items with saved progress", () => {
+    expect(isResumable(125_000_000, false)).toBe(true);
+    expect(isResumable(0, false)).toBe(false);
+    expect(isResumable(125_000_000, true)).toBe(false);
+  });
+});
+
+describe("player year labels", () => {
+  it("formats movies and ended or ongoing series", () => {
+    expect(mediaYearLabel({ Type: "Movie", ProductionYear: 2023 })).toBe("2023");
+    expect(mediaYearLabel({ Type: "Episode", SeriesName: "Example", SeriesProductionYear: 2008, SeriesEndDate: "2015-12-31T00:00:00Z" })).toBe("2008 – 2015");
+    expect(mediaYearLabel({ Type: "Episode", SeriesName: "Example", SeriesProductionYear: 2019, SeriesEndDate: "2019-05-06T00:00:00Z" })).toBe("2019");
+    expect(mediaYearLabel({ Type: "Episode", SeriesName: "Example", SeriesProductionYear: 2008 })).toBe("2008 –");
+    expect(mediaYearLabel({ Type: "Episode", SeriesName: "Example" })).toBe("");
+  });
 });
 
 describe("subtitle cues", () => {
@@ -44,12 +120,10 @@ describe("subtitle cues", () => {
     expect(activeCueText(null)).toBe("");
   });
 
-  it("builds useful labels when subtitle metadata is missing or malformed", () => {
-    expect(subtitleTrackLabel({ Index: 2, DisplayTitle: "English - SDH", Language: "eng" })).toBe("English - SDH");
-    expect(subtitleTrackLabel({ Index: 3, DisplayTitle: "undefined", Language: "chi" })).toBe("Chinese");
-    expect(subtitleTrackLabel({ Index: 4, DisplayTitle: " null ", Language: "zho" })).toBe("Chinese");
-    expect(subtitleTrackLabel({ Index: 5, DisplayTitle: "", Language: "eng" })).toBe("English");
-    expect(subtitleTrackLabel({ Index: 6 })).toBe("Subtitle 6");
+  it("removes implementation details from track labels", () => {
+    expect(subtitleTrackLabel({ Index: 3, DisplayTitle: "English - SUBRIP - External" })).toBe("English");
+    expect(subtitleTrackLabel({ Index: 4, DisplayTitle: "Chinese Simplified | SRT | External" })).toBe("Chinese Simplified");
+    expect(subtitleTrackLabel({ Index: 5, Language: "eng" })).toBe("English");
   });
 });
 
