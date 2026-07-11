@@ -2,7 +2,7 @@ export type RatingBadge = {
   label: string;
   scheme: "ca" | "ca-tv" | "us-tv" | "us-film" | "plain";
   shape: "circle" | "rounded" | "hex" | "diamond" | "octagon" | "plaque";
-  tone: "green" | "yellow" | "blue" | "red" | "mono";
+  tone: "green" | "yellow" | "orange" | "blue" | "red" | "mono";
   ariaLabel: string;
   name: string;
   authority: string;
@@ -53,7 +53,7 @@ const canadianTones: Record<string, RatingBadge["tone"]> = {
   G: "green",
   PG: "yellow",
   "14A": "blue",
-  "18A": "red",
+  "18A": "orange",
   R: "red",
   A: "red",
 };

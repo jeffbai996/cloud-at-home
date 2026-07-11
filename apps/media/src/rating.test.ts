@@ -7,7 +7,7 @@ describe("ratingBadge", () => {
     ["CA-G", { label: "G", scheme: "ca", shape: "circle", tone: "green" }],
     ["CA-PG", { label: "PG", scheme: "ca", shape: "rounded", tone: "yellow" }],
     ["CA-14A", { label: "14A", scheme: "ca", shape: "hex", tone: "blue" }],
-    ["CA-18A", { label: "18A", scheme: "ca", shape: "diamond", tone: "red" }],
+    ["CA-18A", { label: "18A", scheme: "ca", shape: "diamond", tone: "orange" }],
     ["CA-R", { label: "R", scheme: "ca", shape: "circle", tone: "red" }],
     ["CA-A", { label: "A", scheme: "ca", shape: "circle", tone: "red" }],
     ["TV-PG", { label: "TV-PG", scheme: "us-tv", shape: "plaque", tone: "mono" }],
