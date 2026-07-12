@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionVerticalOffset, formatPlaybackStats, isResumable, mediaYearLabel, pauseCinemaDelays, pauseCinemaVisible, playbackStartPosition, progressEvents, resumePosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, webPlaybackProfile } from "./playback";
+import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionLineHeight, captionPrefsVersion, captionVerticalOffset, formatPlaybackStats, isResumable, mediaYearLabel, migrateCaptionDefaults, pauseCinemaDelays, pauseCinemaVisible, playbackStartPosition, progressEvents, resumePosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, webPlaybackProfile } from "./playback";
 
 describe("web playback capabilities", () => {
   it("direct-plays browser-safe video and transcodes incompatible containers or audio to HLS", () => {
@@ -26,11 +26,17 @@ describe("web playback capabilities", () => {
 });
 
 describe("player preferences", () => {
-  it("defaults captions to 75 percent and clamps saved values to 0-200", () => {
-    expect(captionFontSize(undefined)).toBe(75);
+  it("clamps saved caption sizes to 0-200", () => {
+    expect(captionFontSize(undefined)).toBe(85);
     expect(captionFontSize(-10)).toBe(0);
     expect(captionFontSize(143)).toBe(143);
     expect(captionFontSize(260)).toBe(200);
+  });
+
+  it("migrates only the previous subtitle defaults", () => {
+    expect(migrateCaptionDefaults({ fontSize: 75, lineHeight: 1.25, backgroundOpacity: .72, portraitOffset: 8 })).toEqual({ fontSize: 85, lineHeight: 1.45, backgroundOpacity: .5, portraitOffset: 12 });
+    expect(migrateCaptionDefaults({ fontSize: 90, lineHeight: 1.4, backgroundOpacity: .4, portraitOffset: 18 })).toEqual({ fontSize: 90, lineHeight: 1.4, backgroundOpacity: .4, portraitOffset: 18 });
+    expect(migrateCaptionDefaults({ version: captionPrefsVersion, fontSize: 75, lineHeight: 1.25, backgroundOpacity: .72, portraitOffset: 8 })).toEqual({ version: captionPrefsVersion, fontSize: 75, lineHeight: 1.25, backgroundOpacity: .72, portraitOffset: 8 });
   });
 
   it("clamps caption vertical offset to 0-30 percent", () => {
@@ -38,6 +44,13 @@ describe("player preferences", () => {
     expect(captionVerticalOffset(-10)).toBe(0);
     expect(captionVerticalOffset(12)).toBe(12);
     expect(captionVerticalOffset(45)).toBe(30);
+  });
+
+  it("keeps subtitle line height between 1.45 and 2", () => {
+    expect(captionLineHeight(undefined)).toBe(1.45);
+    expect(captionLineHeight(1.2)).toBe(1.45);
+    expect(captionLineHeight(1.7)).toBe(1.7);
+    expect(captionLineHeight(2.2)).toBe(2);
   });
 
   it("uses native video fullscreen only on iPhone and iPod", () => {

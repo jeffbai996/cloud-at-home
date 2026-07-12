@@ -208,6 +208,13 @@ export async function clearWatchHistory(userId: string): Promise<number> {
   return ids.length;
 }
 
+export async function removeWatchHistoryItem(userId: string, itemId: string): Promise<void> {
+  await mediaRequest(
+    `UserPlayedItems/${encodeURIComponent(itemId)}?userId=${encodeURIComponent(userId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export async function search(userId: string, term: string): Promise<MediaItem[]> {
   if (!term.trim()) return [];
   const result = await mediaRequest<{ Items: MediaItem[] }>(

@@ -8,15 +8,37 @@ export const progressEvents = [
 ] as const;
 
 export const airPlayNoticeDurationMs = 5_000;
+export const captionPrefsVersion = 2;
+
+export function migrateCaptionDefaults<T extends {
+  version?: number;
+  fontSize?: number;
+  lineHeight?: number;
+  backgroundOpacity?: number;
+  portraitOffset?: number;
+}>(saved: T): T {
+  if (saved.version === captionPrefsVersion) return saved;
+  const migrated = { ...saved };
+  if (saved.fontSize === 75) migrated.fontSize = 85;
+  if (saved.lineHeight === 1.25) migrated.lineHeight = 1.45;
+  if (saved.backgroundOpacity === .72) migrated.backgroundOpacity = .5;
+  if (saved.portraitOffset === 8) migrated.portraitOffset = 12;
+  return migrated;
+}
 
 export function captionFontSize(value?: number): number {
-  if (!Number.isFinite(value)) return 75;
+  if (!Number.isFinite(value)) return 85;
   return Math.min(200, Math.max(0, value as number));
 }
 
 export function captionVerticalOffset(value?: number): number {
   if (!Number.isFinite(value)) return 8;
   return Math.min(30, Math.max(0, value as number));
+}
+
+export function captionLineHeight(value?: number): number {
+  if (!Number.isFinite(value)) return 1.45;
+  return Math.min(2, Math.max(1.45, value as number));
 }
 
 export function usesNativeVideoFullscreen(userAgent: string): boolean {

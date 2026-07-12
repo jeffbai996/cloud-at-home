@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { AppShell, Button, EmptyState, Modal, Skeleton } from "@cloud-at-home/ui";
-import { clearWatchHistory, getMediaItem, getSeriesEpisodes, getSession, imageUrl, loadHome, login, logout, search, type MediaItem, type Session } from "./api";
+import { clearWatchHistory, getMediaItem, getSeriesEpisodes, getSession, imageUrl, loadHome, login, logout, removeWatchHistoryItem, search, type MediaItem, type Session } from "./api";
 import { Player } from "./Player";
 import { createMediaList, MAX_LIST_NAME_LENGTH, normalizeListName, toggleListItem, validPromotedListId, type MediaList } from "./lists";
 import { mobileHeaderScrollIntent } from "./mobileHeader";
@@ -173,6 +173,22 @@ export default function App() {
     setLists((current) => current.map((list) => list.id === listId ? toggleListItem(list, item) : list));
   }
 
+  async function removeFromHistory(item: MediaItem) {
+    if (!session) return;
+    await removeWatchHistoryItem(session.user.id, item.Id);
+    const clearHistory = (entry: MediaItem): MediaItem => entry.Id === item.Id
+      ? { ...entry, UserData: { ...entry.UserData, PlaybackPositionTicks: 0, PlayedPercentage: 0, Played: false } }
+      : entry;
+    setHome((current) => current ? {
+      ...current,
+      resume: current.resume.filter((entry) => entry.Id !== item.Id),
+      latest: current.latest.map(clearHistory),
+      movies: current.movies.map(clearHistory),
+      series: current.series.map(clearHistory),
+    } : current);
+    setSelected((current) => current ? clearHistory(current) : current);
+  }
+
   function play(item: MediaItem, fromBeginning = false) {
     setHeaderCollapsed(true);
     setPlaying({ item, fromBeginning });
@@ -219,6 +235,7 @@ export default function App() {
           onSearch={() => { setMenuOpen(false); requestAnimationFrame(() => searchRef.current?.focus()); }}
           onRandom={surpriseMe}
           onRefresh={() => { setMenuOpen(false); void refreshHome(session); }}
+          onSignOut={() => void signOut()}
           onClearHistory={async () => {
             const cleared = await clearWatchHistory(session.user.id);
             await refreshHome(session);
@@ -257,7 +274,7 @@ export default function App() {
           </div>
         </>
       )}
-      <AnimatePresence>{selected && <Details item={selected} userId={session.user.id} favorite={favorites.some((entry) => entry.Id === selected.Id)} lists={lists} onToggleFavorite={() => toggleFavorite(selected)} onToggleList={(listId) => toggleItemInList(listId, selected)} onManageLists={() => { setSelected(null); setListsOpen(true); }} onClose={() => setSelected(null)} onPlay={(target, fromBeginning) => { play(target, fromBeginning); setSelected(null); }} />}</AnimatePresence>
+      <AnimatePresence>{selected && <Details item={selected} userId={session.user.id} favorite={favorites.some((entry) => entry.Id === selected.Id)} lists={lists} onToggleFavorite={() => toggleFavorite(selected)} onToggleList={(listId) => toggleItemInList(listId, selected)} onRemoveHistory={() => removeFromHistory(selected)} onManageLists={() => { setSelected(null); setListsOpen(true); }} onClose={() => setSelected(null)} onPlay={(target, fromBeginning) => { play(target, fromBeginning); setSelected(null); }} />}</AnimatePresence>
       <AnimatePresence>{playing && <Player key={playing.item.Id} item={playing.item} fromBeginning={playing.fromBeginning} session={session} onPlayEpisode={(episode) => play(episode)} onClose={() => { setPlaying(null); setHeaderCollapsed(false); void refreshHome(session); }} />}</AnimatePresence>
       <ListManager open={listsOpen} lists={lists} promotedListId={promotedListId} onClose={() => setListsOpen(false)} onChange={setLists} onPromote={setPromotedListId} onOpen={showList} />
     </AppShell>
@@ -276,6 +293,7 @@ function CloudMediaMenu({
   onSearch,
   onRandom,
   onRefresh,
+  onSignOut,
   onClearHistory,
 }: {
   open: boolean;
@@ -289,6 +307,7 @@ function CloudMediaMenu({
   onSearch: () => void;
   onRandom: () => void;
   onRefresh: () => void;
+  onSignOut: () => void;
   onClearHistory: () => Promise<number>;
 }) {
   const [clearState, setClearState] = useState<"idle" | "confirm" | "clearing" | "cleared" | "error">("idle");
@@ -328,6 +347,7 @@ function CloudMediaMenu({
             <button onClick={onRandom}><Shuffle size={16} />Surprise me</button>
             <button onClick={onRefresh}><RefreshCw size={16} />Refresh home</button>
             <button className={`cloud-media-clear-history ${clearState === "confirm" || clearState === "error" ? "confirm" : ""}`} disabled={clearState === "clearing" || clearState === "cleared"} onClick={() => void handleClearHistory()}><Trash2 size={16} />{clearLabel}</button>
+            <button className="cloud-media-menu-mobile-signout" onClick={onSignOut}><LogOut size={16} />Sign out</button>
             <div className="cloud-media-menu-footer">
               <span>Signed in as {username}</span>
             </div>
@@ -369,7 +389,7 @@ function Hero({ item, onPlay, onInfo }: { item: MediaItem; onPlay: (fromBeginnin
         <h1>{item.Name}</h1>
         <div className="hero-meta">{item.ProductionYear && <span>{item.ProductionYear}</span>}{minutes > 0 && <span>{minutes} min</span>}</div>
         {item.Overview && <p>{item.Overview}</p>}
-        <div className="hero-actions"><Button onClick={() => onPlay(false)}><Play size={18} fill="currentColor" /> {resumable ? "Resume" : "Play"}</Button>{resumable && <Button variant="secondary" onClick={() => onPlay(true)}><RotateCcw size={17} /> Play from beginning</Button>}<Button variant="secondary" onClick={onInfo}>More info</Button></div>
+        <div className="hero-actions"><Button onClick={() => onPlay(false)}><Play size={18} fill="currentColor" /> {resumable ? "Resume" : "Play"}</Button>{resumable && <Button variant="secondary" onClick={() => onPlay(true)}><RotateCcw size={17} /> Play from beginning</Button>}<Button className="hero-more-info" variant="secondary" onClick={onInfo}>More info</Button></div>
       </motion.div>
     </section>
   );
@@ -396,13 +416,15 @@ function MediaCard({ item, onClick }: { item: MediaItem; onClick: () => void }) 
   );
 }
 
-function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList, onManageLists, onClose, onPlay }: { item: MediaItem; userId: string; favorite: boolean; lists: MediaList[]; onToggleFavorite: () => void; onToggleList: (listId: string) => void; onManageLists: () => void; onClose: () => void; onPlay: (target: MediaItem, fromBeginning: boolean) => void }) {
+function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList, onRemoveHistory, onManageLists, onClose, onPlay }: { item: MediaItem; userId: string; favorite: boolean; lists: MediaList[]; onToggleFavorite: () => void; onToggleList: (listId: string) => void; onRemoveHistory: () => Promise<void>; onManageLists: () => void; onClose: () => void; onPlay: (target: MediaItem, fromBeginning: boolean) => void }) {
   const art = item.BackdropImageTags?.length ? "Backdrop" : "Primary";
   const [episodes, setEpisodes] = useState<MediaItem[]>([]);
   const [episodeError, setEpisodeError] = useState("");
   const [loadingEpisodes, setLoadingEpisodes] = useState(item.Type === "Series");
   const [listPicker, setListPicker] = useState(false);
+  const [historyState, setHistoryState] = useState<"idle" | "removing" | "error">("idle");
   const minutes = runtimeMinutes(item);
+  const hasWatchHistory = Boolean((item.UserData?.PlaybackPositionTicks ?? 0) > 0 || item.UserData?.Played);
   const nextEpisode = episodes.find((episode) => !episode.UserData?.Played) ?? episodes[0];
   const playTarget = nextEpisode ?? item;
   const resumable = itemCanResume(playTarget);
@@ -435,7 +457,7 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
   return (
     <motion.div className="details-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
       <motion.article className={`details-card ${item.Type === "Series" ? "details-card-series" : ""}`} layoutId={`media-${item.Id}`} initial={{ y: 40, scale: .97 }} animate={{ y: 0, scale: 1 }} exit={{ y: 26, opacity: 0 }} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="details-art" style={{ backgroundImage: `linear-gradient(0deg, var(--surface) 0%, transparent 65%), url(${imageUrl(item, art, 1300)})` }}><button className="details-close icon-button" onClick={onClose}><X /></button></div>
+        <div className="details-art" style={{ backgroundImage: `linear-gradient(0deg, var(--surface) 0%, transparent 65%), url(${imageUrl(item, art, 1300)})` }}><button className="details-close icon-button" aria-label="Close details" onClick={onClose}><X /></button></div>
         <div className="details-copy">
           <span className="eyebrow">{item.Type}</span>
           <h1>{item.Name}</h1>
@@ -446,6 +468,7 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
             {resumable && <Button className="details-start-over" variant="secondary" onClick={() => onPlay(withSeriesMetadata(playTarget, item), true)}><RotateCcw size={17} /> Play from beginning</Button>}
             <Button className={`details-list details-favorite ${favorite ? "active" : ""}`} variant="ghost" onClick={onToggleFavorite}><Heart size={17} fill={favorite ? "currentColor" : "none"} />{favorite ? "Favorited" : "Add to favorites"}</Button>
             <Button className="details-list details-add-list" variant="ghost" onClick={() => lists.length ? setListPicker(true) : onManageLists()}><ListPlus size={17} />{lists.length ? "Add to list" : "Create a list"}</Button>
+            {hasWatchHistory && <Button className="details-list details-remove-history" variant="ghost" disabled={historyState === "removing"} onClick={() => { setHistoryState("removing"); void onRemoveHistory().then(() => setHistoryState("idle")).catch(() => setHistoryState("error")); }}><Trash2 size={16} />{historyState === "removing" ? "Removing…" : historyState === "error" ? "Try removing again" : "Remove from history"}</Button>}
           </div>
           {resumable && <div className="details-progress"><div><strong>{watched}% watched</strong><span>{playTarget.Type === "Episode" ? playTarget.Name : `${Math.max(1, Math.round((playTarget.UserData?.PlaybackPositionTicks ?? 0) / 600_000_000))} min in`}</span></div><div><i style={{ width: `${Math.min(100, watched)}%` }} /></div></div>}
           <div className="details-facts">

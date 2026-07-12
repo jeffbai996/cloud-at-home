@@ -21,7 +21,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { Button, Modal } from "@cloud-at-home/ui";
 import { createStreamTicket, getPlaybackInfo, getSeriesEpisodes, imageUrl, loadSubtitleTrack, reportPlayback, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
-import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionVerticalOffset, formatPlaybackStats, mediaYearLabel, pauseCinemaDelays, playbackStartPosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, type TrickplayInfo } from "./playback";
+import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionLineHeight, captionPrefsVersion, captionVerticalOffset, formatPlaybackStats, mediaYearLabel, migrateCaptionDefaults, pauseCinemaDelays, playbackStartPosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, type TrickplayInfo } from "./playback";
 
 type SafariVideo = HTMLVideoElement & {
   webkitShowPlaybackTargetPicker?: () => void;
@@ -47,12 +47,13 @@ type CaptionPrefs = {
   fontWeight: number;
   lineHeight: number;
   letterSpacing: number;
+  phonePortraitOffset: number;
   portraitOffset: number;
   landscapeOffset: number;
   backgroundOpacity: number;
 };
 
-const defaultCaptions: CaptionPrefs = { fontSize: 75, fontWeight: 600, lineHeight: 1.25, letterSpacing: 0, portraitOffset: 8, landscapeOffset: 8, backgroundOpacity: 0.72 };
+const defaultCaptions: CaptionPrefs = { fontSize: 85, fontWeight: 600, lineHeight: 1.45, letterSpacing: 0, phonePortraitOffset: 25, portraitOffset: 12, landscapeOffset: 8, backgroundOpacity: 0.5 };
 const playbackPrefsKey = "cloud-media-playback";
 
 type PlaybackPrefs = { muted: boolean; volume: number; rate?: number; fit?: "contain" | "cover"; subtitleLanguage?: string; subtitlesOff?: boolean };
@@ -92,21 +93,24 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const [seriesEpisodes, setSeriesEpisodes] = useState<MediaItem[]>([]);
   const [captions, setCaptions] = useState<CaptionPrefs>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem("cloud-media-captions") ?? "{}");
-      const legacyOffset = captionVerticalOffset(saved.offset);
+      const saved = migrateCaptionDefaults(JSON.parse(localStorage.getItem("cloud-media-captions") ?? "{}"));
+      const legacyOffset = saved.offset == null ? undefined : captionVerticalOffset(saved.offset);
       return {
         ...defaultCaptions,
         ...saved,
         fontSize: captionFontSize(saved.fontSize),
-        portraitOffset: captionVerticalOffset(saved.portraitOffset ?? legacyOffset),
+        lineHeight: captionLineHeight(saved.lineHeight),
+        phonePortraitOffset: captionVerticalOffset(saved.phonePortraitOffset ?? defaultCaptions.phonePortraitOffset),
+        portraitOffset: captionVerticalOffset(saved.portraitOffset ?? legacyOffset ?? defaultCaptions.portraitOffset),
         // A portrait-safe legacy value can land halfway up the picture after
         // rotation. Start landscape lower, then remember both independently.
-        landscapeOffset: captionVerticalOffset(saved.landscapeOffset ?? Math.min(legacyOffset, 12)),
+        landscapeOffset: captionVerticalOffset(saved.landscapeOffset ?? (legacyOffset == null ? defaultCaptions.landscapeOffset : Math.min(legacyOffset, 12))),
       };
     }
     catch { return defaultCaptions; }
   });
   const [smartphoneLandscape, setSmartphoneLandscape] = useState(() => window.matchMedia("(orientation: landscape) and (max-height: 600px)").matches);
+  const [phonePortrait, setPhonePortrait] = useState(() => window.matchMedia("(orientation: portrait) and (max-width: 520px)").matches);
   const [playbackRate, setPlaybackRate] = useState(playbackPrefs.current.rate ?? 1);
   const [videoFit, setVideoFit] = useState<"contain" | "cover">(playbackPrefs.current.fit ?? "contain");
   const [pauseCinema, setPauseCinema] = useState(false);
@@ -130,7 +134,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const pauseTitleLead = pauseTitleBreak > 0 ? pauseTitle.slice(0, pauseTitleBreak + 1) : "";
   const pauseTitleTail = pauseTitleBreak > 0 ? pauseTitle.slice(pauseTitleBreak + 1) : pauseTitle;
   const pauseDelays = pauseCinemaDelays(Boolean(item.SeriesName));
-  const captionOffset = smartphoneLandscape ? captions.landscapeOffset : captions.portraitOffset;
+  const captionOffset = smartphoneLandscape ? captions.landscapeOffset : phonePortrait ? captions.phonePortraitOffset : captions.portraitOffset;
   const subtitles = useMemo(() => source?.MediaStreams?.filter((stream) => stream.Type === "Subtitle") ?? [], [source]);
   const videoStream = source?.MediaStreams?.find((stream) => stream.Type === "Video");
   const audioStream = source?.MediaStreams?.find((stream) => stream.Type === "Audio");
@@ -319,15 +323,23 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   }, [settings]);
 
   useEffect(() => {
-    localStorage.setItem("cloud-media-captions", JSON.stringify(captions));
+    localStorage.setItem("cloud-media-captions", JSON.stringify({ ...captions, version: captionPrefsVersion }));
   }, [captions]);
 
   useEffect(() => {
-    const query = window.matchMedia("(orientation: landscape) and (max-height: 600px)");
-    const syncOrientation = () => setSmartphoneLandscape(query.matches);
-    query.addEventListener("change", syncOrientation);
+    const landscapeQuery = window.matchMedia("(orientation: landscape) and (max-height: 600px)");
+    const phonePortraitQuery = window.matchMedia("(orientation: portrait) and (max-width: 520px)");
+    const syncOrientation = () => {
+      setSmartphoneLandscape(landscapeQuery.matches);
+      setPhonePortrait(phonePortraitQuery.matches);
+    };
+    landscapeQuery.addEventListener("change", syncOrientation);
+    phonePortraitQuery.addEventListener("change", syncOrientation);
     syncOrientation();
-    return () => query.removeEventListener("change", syncOrientation);
+    return () => {
+      landscapeQuery.removeEventListener("change", syncOrientation);
+      phonePortraitQuery.removeEventListener("change", syncOrientation);
+    };
   }, []);
 
   useEffect(() => {
@@ -715,10 +727,10 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
           <div className="settings-section settings-sliders">
             <label><span>Text size <b>{captions.fontSize}%</b></span><input type="range" min="0" max="200" value={captions.fontSize} onChange={(event) => setCaptions({ ...captions, fontSize: captionFontSize(Number(event.target.value)) })} /></label>
             <label><span>Font weight <b>{captions.fontWeight}</b></span><input type="range" min="300" max="800" step="100" value={captions.fontWeight} onChange={(event) => setCaptions({ ...captions, fontWeight: Number(event.target.value) })} /></label>
-            <label><span>Line height <b>{captions.lineHeight.toFixed(2)}</b></span><input type="range" min="1" max="2" step="0.05" value={captions.lineHeight} onChange={(event) => setCaptions({ ...captions, lineHeight: Number(event.target.value) })} /></label>
+            <label><span>Line height <b>{captions.lineHeight.toFixed(2)}</b></span><input type="range" min="1.45" max="2" step="0.05" value={captions.lineHeight} onChange={(event) => setCaptions({ ...captions, lineHeight: captionLineHeight(Number(event.target.value)) })} /></label>
             <label><span>Letter spacing <b>{captions.letterSpacing}px</b></span><input type="range" min="-2" max="8" step="0.25" value={captions.letterSpacing} onChange={(event) => setCaptions({ ...captions, letterSpacing: Number(event.target.value) })} /></label>
-            <label><span>Vertical offset <b>{captionOffset}%</b></span><input type="range" min="0" max="30" value={captionOffset} onChange={(event) => setCaptions({ ...captions, [smartphoneLandscape ? "landscapeOffset" : "portraitOffset"]: captionVerticalOffset(Number(event.target.value)) })} /></label>
-            <label><span>Background <b>{Math.round(captions.backgroundOpacity * 100)}%</b></span><input type="range" min="0" max="1" step="0.05" value={captions.backgroundOpacity} onChange={(event) => setCaptions({ ...captions, backgroundOpacity: Number(event.target.value) })} /></label>
+            <label><span>Vertical offset <b>{captionOffset}%</b></span><input type="range" min="0" max="30" value={captionOffset} onChange={(event) => setCaptions({ ...captions, [smartphoneLandscape ? "landscapeOffset" : phonePortrait ? "phonePortraitOffset" : "portraitOffset"]: captionVerticalOffset(Number(event.target.value)) })} /></label>
+            <label><span>Background opacity <b>{Math.round(captions.backgroundOpacity * 100)}%</b></span><input type="range" min="0" max="1" step="0.05" value={captions.backgroundOpacity} onChange={(event) => setCaptions({ ...captions, backgroundOpacity: Number(event.target.value) })} /></label>
           </div>
           <div className="settings-actions"><Button variant="ghost" onClick={() => setCaptions(defaultCaptions)}>Reset</Button><Button variant="secondary" onClick={() => setSettings(null)}>Done</Button></div>
         </div>
@@ -751,14 +763,14 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
 
 function PlayPauseGlyph({ playing }: { playing: boolean }) {
   return (
-    <AnimatePresence mode="wait" initial={false}>
+    <AnimatePresence initial={false}>
       <motion.span
         className="playback-glyph"
         key={playing ? "pause" : "play"}
         initial={{ opacity: 0, scale: .72, rotate: playing ? -8 : 8 }}
         animate={{ opacity: 1, scale: 1, rotate: 0 }}
         exit={{ opacity: 0, scale: .78, rotate: playing ? 8 : -8 }}
-        transition={{ duration: .22, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: .14, ease: [0.22, 1, 0.36, 1] }}
       >
         {playing ? <Pause /> : <Play />}
       </motion.span>
