@@ -681,7 +681,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
               <div className="player-row">
                 <button className="player-icon player-bar-play" aria-label={playing ? "Pause" : "Play"} onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()}><PlayPauseGlyph playing={playing} /></button>
                 <button className="player-icon" onClick={() => { if (videoRef.current) videoRef.current.muted = !videoRef.current.muted; }}>{muted ? <VolumeX /> : <Volume2 />}</button>
-                <span className="timecode">{formatTime(position)} / {formatTime(duration)}</span>
+                <span className="timecode"><span>{formatTime(position)}</span><span className="timecode-total"> / {formatTime(duration)}</span></span>
                 <span className="player-spacer" />
                 {item.SeriesId && <button className="player-icon" aria-label="Choose episode" onClick={() => setSettings("episodes")}><ListVideo /></button>}
                 {subtitles.length > 0 && <button className="player-icon" aria-label="Subtitle settings" onClick={() => setSettings("captions")}><Captions /></button>}

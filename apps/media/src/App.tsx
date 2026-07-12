@@ -6,8 +6,10 @@ import { AppShell, Button, EmptyState, Modal, Skeleton } from "@cloud-at-home/ui
 import { clearWatchHistory, getMediaItem, getSeriesEpisodes, getSession, imageUrl, loadHome, login, logout, search, type MediaItem, type Session } from "./api";
 import { Player } from "./Player";
 import { createMediaList, MAX_LIST_NAME_LENGTH, normalizeListName, toggleListItem, validPromotedListId, type MediaList } from "./lists";
+import { mobileHeaderScrollIntent } from "./mobileHeader";
 import { isResumable } from "./playback";
 import { ratingBadge } from "./rating";
+import { buildMovieShelves } from "./shelves";
 
 type Home = { resume: MediaItem[]; latest: MediaItem[]; movies: MediaItem[]; series: MediaItem[] };
 type PlaybackSelection = { item: MediaItem; fromBeginning: boolean };
@@ -33,7 +35,10 @@ export default function App() {
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [listsOpen, setListsOpen] = useState(false);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const searchShellRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { void recoverSession(); }, []);
   useEffect(() => {
@@ -80,8 +85,39 @@ export default function App() {
       window.scrollTo(0, scrollY);
     };
   }, [selected]);
+  useEffect(() => {
+    const closeEmptySearch = (event: PointerEvent) => {
+      if (!mobileSearchOpen || query || searchShellRef.current?.contains(event.target as Node)) return;
+      setMobileSearchOpen(false);
+    };
+    document.addEventListener("pointerdown", closeEmptySearch);
+    return () => document.removeEventListener("pointerdown", closeEmptySearch);
+  }, [mobileSearchOpen, query]);
+  useEffect(() => {
+    const mobile = window.matchMedia("(max-width: 700px)");
+    let previousY = window.scrollY;
+    const sync = () => {
+      const currentY = window.scrollY;
+      if (!mobile.matches || mobileSearchOpen || menuOpen || selected || playing || headerCollapsed) {
+        setMobileHeaderHidden(false);
+        previousY = currentY;
+        return;
+      }
+      const intent = mobileHeaderScrollIntent(previousY, currentY);
+      if (intent) setMobileHeaderHidden(intent === "hide");
+      if (intent || Math.abs(currentY - previousY) >= 12) previousY = currentY;
+    };
+    window.addEventListener("scroll", sync, { passive: true });
+    mobile.addEventListener("change", sync);
+    sync();
+    return () => {
+      window.removeEventListener("scroll", sync);
+      mobile.removeEventListener("change", sync);
+    };
+  }, [headerCollapsed, menuOpen, mobileSearchOpen, playing, selected]);
 
   const hero = useMemo(() => home?.resume[0] ?? home?.latest[0] ?? home?.movies[0], [home]);
+  const movieShelves = useMemo(() => buildMovieShelves(home?.movies ?? []), [home?.movies]);
   const promotedList = lists.find((list) => list.id === promotedListId) ?? null;
   const activeList = lists.find((list) => list.id === activeListId) ?? null;
 
@@ -169,6 +205,7 @@ export default function App() {
       kind="media"
       brand="Cloud Media"
       headerCollapsed={headerCollapsed}
+      headerAutoHidden={mobileHeaderHidden}
       navigation={
         <><CloudMediaMenu
           open={menuOpen}
@@ -190,11 +227,11 @@ export default function App() {
         /><button className="icon-button topbar-signout" aria-label="Sign out" title="Sign out" onClick={() => void signOut()}><LogOut size={17} /></button></>
       }
       actions={
-        <><button className={`media-nav-list media-favorites-nav ${libraryView === "favorites" ? "active" : ""}`} aria-label={`Favorites ${favorites.length}`} onClick={showFavorites}><Heart size={16} fill={libraryView === "favorites" ? "currentColor" : "none"} /><span>Favorites</span>{favorites.length > 0 && <b>{favorites.length}</b>}</button>{promotedList && <button className={`media-nav-list promoted ${libraryView === "list" && activeListId === promotedList.id ? "active" : ""}`} aria-label={`${promotedList.name} ${promotedList.items.length}`} onClick={() => showList(promotedList.id)}><ListPlus size={16} /><span title={promotedList.name}>{promotedList.name}</span>{promotedList.items.length > 0 && <b>{promotedList.items.length}</b>}</button>}<div className="media-search-shell" onFocus={() => setSearchFocused(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchFocused(false); }}><div className={`media-search ${query ? "media-search-active" : ""}`}>
-          <Search size={17} />
-          <input ref={searchRef} type="search" value={query} onFocus={() => setLibraryView("home")} onChange={(event) => setQuery(event.target.value)} placeholder="search..." aria-label="Search Cloud Media" autoComplete="off" />
+        <><button className={`media-nav-list media-favorites-nav ${libraryView === "favorites" ? "active" : ""}`} aria-label={`Favorites ${favorites.length}`} onClick={showFavorites}><Heart size={16} fill={libraryView === "favorites" ? "currentColor" : "none"} /><span>Favorites</span>{favorites.length > 0 && <b>{favorites.length}</b>}</button>{promotedList && <button className={`media-nav-list promoted ${libraryView === "list" && activeListId === promotedList.id ? "active" : ""}`} aria-label={`${promotedList.name} ${promotedList.items.length}`} onClick={() => showList(promotedList.id)}><ListPlus size={16} /><span title={promotedList.name}>{promotedList.name}</span>{promotedList.items.length > 0 && <b>{promotedList.items.length}</b>}</button>}<div ref={searchShellRef} className={`media-search-shell ${mobileSearchOpen ? "mobile-search-open" : ""}`} onFocus={() => setSearchFocused(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchFocused(false); }}><button className="icon-button media-search-trigger" aria-label="Search" aria-expanded={mobileSearchOpen} onClick={() => { const opening = !mobileSearchOpen; setMobileSearchOpen(opening); if (opening) requestAnimationFrame(() => searchRef.current?.focus()); }}><SearchGlyph size={17} /></button><div className={`media-search ${query ? "media-search-active" : ""}`}>
+          <SearchGlyph size={17} />
+          <input ref={searchRef} type="search" value={query} onFocus={() => setLibraryView("home")} onKeyDown={(event) => { if (event.key === "Escape") { setQuery(""); setMobileSearchOpen(false); searchRef.current?.blur(); } }} onChange={(event) => setQuery(event.target.value)} placeholder="search..." aria-label="Search Cloud Media" autoComplete="off" />
           {query && <button aria-label="Clear search" onClick={() => setQuery("")}><X size={15} /></button>}
-        </div>{searchFocused && query.trim() && results.length > 0 && <div className="media-search-suggestions" role="listbox" aria-label="Search suggestions">{results.slice(0, 6).map((item) => <button key={item.Id} role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSelected(item); setQuery(""); setSearchFocused(false); searchRef.current?.blur(); }}><img src={imageUrl(item, "Primary", 100)} alt="" /><span><strong>{item.SeriesName ?? item.Name}</strong><small>{item.SeriesName ? item.Name : [item.ProductionYear, item.Type === "Series" ? "TV" : item.Type].filter(Boolean).join(" · ")}</small></span></button>)}</div>}</div><button className="icon-button media-home-action" aria-label="Home" title="Home" onClick={() => navigateTo()}><House size={17} /></button><button className="icon-button media-cinema-action" aria-label="Cinema mode" title="Cinema mode" onClick={() => { setMenuOpen(false); setHeaderCollapsed(true); }}><Clapperboard size={17} /></button></>
+        </div>{searchFocused && query.trim() && results.length > 0 && <div className="media-search-suggestions" role="listbox" aria-label="Search suggestions">{results.slice(0, 6).map((item) => <button key={item.Id} role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSelected(item); setQuery(""); setSearchFocused(false); setMobileSearchOpen(false); searchRef.current?.blur(); }}><img src={imageUrl(item, "Primary", 100)} alt="" /><span><strong>{item.SeriesName ?? item.Name}</strong><small>{item.SeriesName ? item.Name : [item.ProductionYear, item.Type === "Series" ? "TV" : item.Type].filter(Boolean).join(" · ")}</small></span></button>)}</div>}</div><button className="icon-button media-home-action" aria-label="Home" title="Home" onClick={() => navigateTo()}><House size={17} /></button><button className="icon-button media-cinema-action" aria-label="Cinema mode" title="Cinema mode" onClick={() => { setMenuOpen(false); setMobileSearchOpen(false); setHeaderCollapsed(true); }}><Clapperboard size={17} /></button></>
       }
     >
       {headerCollapsed && !playing && <div className="cloud-media-header-reveal-zone" onMouseEnter={() => setHeaderCollapsed(false)}><button className="cloud-media-header-restore" aria-label="Restore Cloud Media header" onClick={() => setHeaderCollapsed(false)}><ChevronDown size={17} /><span>Show header</span></button></div>}
@@ -216,6 +253,7 @@ export default function App() {
             <MediaRail id="recently-added" title="Recently added" items={home.latest} onSelect={setSelected} />
             <MediaRail id="movies" title="Movies" items={home.movies} onSelect={setSelected} />
             <MediaRail id="shows" title="TV Series" items={home.series} onSelect={setSelected} />
+            {movieShelves.map((shelf) => <MediaRail key={shelf.id} id={`movies-${shelf.id}`} title={shelf.title} items={shelf.items} onSelect={setSelected} />)}
           </div>
         </>
       )}
@@ -279,7 +317,7 @@ function CloudMediaMenu({
           <motion.div className="cloud-media-menu-popover" initial={{ opacity: 0, y: -8, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -5, scale: .98 }}>
             <span>Browse Cloud Media</span>
             <button onClick={onSearch}><Search size={16} />Search library</button>
-            <button onClick={onFavorites}><Heart size={16} />Favorites</button>
+            <button className="cloud-media-menu-favorites" onClick={onFavorites}><Heart size={16} />Favorites</button>
             {items.map((entry) => <button key={entry.name} onClick={() => onNavigate(entry.section)}>{entry.icon}{entry.name}</button>)}
             <div className="cloud-media-menu-rule" />
             <span>Lists</span>
@@ -407,17 +445,17 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
             <Button className="details-play" disabled={item.Type === "Series" && !nextEpisode} onClick={() => onPlay(withSeriesMetadata(playTarget, item), false)}><Play size={18} fill="currentColor" /> {primaryLabel}</Button>
             {resumable && <Button className="details-start-over" variant="secondary" onClick={() => onPlay(withSeriesMetadata(playTarget, item), true)}><RotateCcw size={17} /> Play from beginning</Button>}
             <Button className={`details-list details-favorite ${favorite ? "active" : ""}`} variant="ghost" onClick={onToggleFavorite}><Heart size={17} fill={favorite ? "currentColor" : "none"} />{favorite ? "Favorited" : "Add to favorites"}</Button>
-            <Button className="details-list details-add-list" variant="ghost" onClick={() => lists.length ? setListPicker(true) : onManageLists()}><Plus size={17} />{lists.length ? "Add to list" : "Create a list"}</Button>
+            <Button className="details-list details-add-list" variant="ghost" onClick={() => lists.length ? setListPicker(true) : onManageLists()}><ListPlus size={17} />{lists.length ? "Add to list" : "Create a list"}</Button>
           </div>
           {resumable && <div className="details-progress"><div><strong>{watched}% watched</strong><span>{playTarget.Type === "Episode" ? playTarget.Name : `${Math.max(1, Math.round((playTarget.UserData?.PlaybackPositionTicks ?? 0) / 600_000_000))} min in`}</span></div><div><i style={{ width: `${Math.min(100, watched)}%` }} /></div></div>}
           <div className="details-facts">
             {item.OfficialRating && <OfficialRating value={item.OfficialRating} />}
             {item.CommunityRating && <ScorePill kind="community" value={item.CommunityRating.toFixed(1)} />}
             {item.CriticRating != null && <ScorePill kind="critic" value={`${Math.round(item.CriticRating)}%`} />}
-            {genrePills.map((genre) => <span className="details-category details-category-genre" key={genre}>{genre}</span>)}
-            {studioPill && <span className="details-category details-category-context details-category-studio" title={studioPill}>{studioPill}</span>}
-            {countryPill && <span className="details-category details-category-context details-category-country" title={countryPill}>{countryPill}</span>}
-            {!item.OfficialRating && !item.CommunityRating && item.CriticRating == null && !genrePills.length && !studioPill && !countryPill && <span className="details-category">{item.Type === "Series" ? "Serialized drama" : "Feature presentation"}</span>}
+            {genrePills.map((genre) => <span className="details-category details-category-genre" key={genre}><span className="details-category-label">{genre}</span></span>)}
+            {studioPill && <span className="details-category details-category-context details-category-studio" title={studioPill}><span className="details-category-label">{studioPill}</span></span>}
+            {countryPill && <span className="details-category details-category-context details-category-country" title={countryPill}><span className="details-category-label">{countryPill}</span></span>}
+            {!item.OfficialRating && !item.CommunityRating && item.CriticRating == null && !genrePills.length && !studioPill && !countryPill && <span className="details-category"><span className="details-category-label">{item.Type === "Series" ? "Serialized drama" : "Feature presentation"}</span></span>}
           </div>
         </div>
         {item.Type === "Series" && (
@@ -541,7 +579,9 @@ function TomatoMark() {
 function OfficialRating({ value }: { value: string }) {
   const badge = ratingBadge(value);
   const tooltipId = useId();
-  const letterClassName = badge.scheme === "us-film" && badge.label === "G" ? " rating-badge-letter-g" : "";
+  const letterClassName = badge.scheme === "us-film" && badge.label === "G"
+    ? " rating-badge-letter-g"
+    : badge.scheme === "ca" && badge.label === "R" ? " rating-badge-letter-r" : "";
   const badgeClassName = `rating-badge rating-badge-${badge.scheme} rating-badge-${badge.shape} rating-badge-${badge.tone}${letterClassName}`;
   return (
     <span className="rating-classification">
@@ -555,6 +595,10 @@ function OfficialRating({ value }: { value: string }) {
       </span>
     </span>
   );
+}
+
+function SearchGlyph({ size = 17 }: { size?: number }) {
+  return <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.4" /><path d="m13.5 13.5-3.2-3.2" /></svg>;
 }
 
 function RatingBadgeLabel({ scheme, label }: { scheme: string; label: string }) {

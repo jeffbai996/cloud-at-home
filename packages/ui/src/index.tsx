@@ -130,6 +130,7 @@ export function AppShell({
   navigation,
   urls,
   headerCollapsed = false,
+  headerAutoHidden = false,
 }: {
   kind: AppKind;
   brand: string;
@@ -138,10 +139,11 @@ export function AppShell({
   navigation?: ReactNode;
   urls?: Partial<Record<ServiceKind, string>>;
   headerCollapsed?: boolean;
+  headerAutoHidden?: boolean;
 }) {
   const BrandIcon = kind === "media" ? Clapperboard : kind === "files" ? Cloud : Sparkles;
   return (
-    <div className={`app app-${kind} ${headerCollapsed ? "app-header-collapsed" : ""}`}>
+    <div className={`app app-${kind} ${headerCollapsed ? "app-header-collapsed" : ""} ${headerAutoHidden ? "app-header-auto-hidden" : ""}`}>
       <header className="topbar">
         <div className="topbar-left">
           <a href="/" className="brand">

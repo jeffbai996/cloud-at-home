@@ -175,8 +175,8 @@ export async function loadHome(userId: string) {
   const [resume, latest, movies, series] = await Promise.all([
     mediaRequest<{ Items: MediaItem[] }>(`Users/${userId}/Items/Resume?Limit=20&MediaTypes=Video&Fields=${fields}`),
     mediaRequest<MediaItem[]>(`Users/${userId}/Items/Latest?Limit=24&IncludeItemTypes=Movie,Episode&Fields=${fields}`),
-    mediaRequest<{ Items: MediaItem[] }>(`Users/${userId}/Items?Recursive=true&IncludeItemTypes=Movie&SortBy=SortName&Fields=${fields}&Limit=100`),
-    mediaRequest<{ Items: MediaItem[] }>(`Users/${userId}/Items?Recursive=true&IncludeItemTypes=Series&SortBy=SortName&Fields=${fields}&Limit=100`),
+    mediaRequest<{ Items: MediaItem[] }>(`Users/${userId}/Items?Recursive=true&IncludeItemTypes=Movie&SortBy=SortName&Fields=${fields}&Limit=500`),
+    mediaRequest<{ Items: MediaItem[] }>(`Users/${userId}/Items?Recursive=true&IncludeItemTypes=Series&SortBy=SortName&Fields=${fields}&Limit=500`),
   ]);
   const shows = series.Items ?? [];
   const byId = new Map(shows.map((show) => [show.Id, show]));
