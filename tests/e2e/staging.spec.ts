@@ -318,6 +318,9 @@ test("Cloud Media player shows a streaming-style time preview", async ({ page })
   await expect(page.getByText("Background opacity — 72%", { exact: true })).toBeVisible();
   await page.getByLabel("Subtitle track").selectOption("0");
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("cloud-media-playback") ?? "{}").subtitleLanguage)).toBe("eng");
+  await expect(page.locator("video track")).toHaveAttribute("label", "English");
+  await expect(page.locator("video track")).toHaveAttribute("srclang", "en");
+  await expect(page.locator("video track")).toHaveAttribute("default", "");
   await expect.poll(() => page.locator("video track").evaluate((track: HTMLTrackElement) => track.track.cues?.length ?? 0)).toBe(1);
   await page.getByRole("button", { name: "Done" }).click();
   await page.locator("video").evaluate((video) => {

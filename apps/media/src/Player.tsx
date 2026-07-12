@@ -464,6 +464,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       node.remove();
     });
     if (index === null) { setError(""); return; }
+    if (!selected) { setError("Could not load subtitle track."); return; }
     setError("");
     let trackUrl: string;
     try { trackUrl = await loadSubtitleTrack(item.Id, source.Id, index); }
@@ -475,7 +476,9 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     subtitleBlobUrlRef.current = trackUrl;
     const track = document.createElement("track");
     track.kind = "subtitles";
-    track.default = false;
+    track.label = subtitleTrackLabel(selected);
+    track.srclang = nativeSubtitleLanguage(selected.Language);
+    track.default = true;
     track.addEventListener("load", () => {
       subtitleTrackRef.current = track;
       track.track.mode = nativeFullscreenRef.current ? "showing" : "hidden";
@@ -551,7 +554,11 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     if (usesNativeVideoFullscreen(navigator.userAgent)) {
       const video = videoRef.current;
       if (typeof video?.webkitEnterFullscreen === "function") {
-        try { video.webkitEnterFullscreen(); }
+        try {
+          const track = subtitleTrackRef.current?.track;
+          if (track && subtitleIndex !== null) track.mode = "showing";
+          video.webkitEnterFullscreen();
+        }
         catch { setViewportFullscreen(true); window.scrollTo(0, 0); }
       } else {
         setViewportFullscreen(true);
@@ -806,4 +813,15 @@ function captureVideoFrame(video: HTMLVideoElement): string {
 function isAppleTouchDevice(): boolean {
   return /iPad|iPhone|iPod/.test(navigator.userAgent)
     || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function nativeSubtitleLanguage(language?: string): string {
+  const normalized = (language ?? "").toLowerCase();
+  const codes: Record<string, string> = {
+    eng: "en", en: "en", zho: "zh", chi: "zh", cmn: "zh", zh: "zh",
+    spa: "es", es: "es", fra: "fr", fre: "fr", fr: "fr", deu: "de", ger: "de", de: "de",
+    jpn: "ja", ja: "ja", kor: "ko", ko: "ko", por: "pt", pt: "pt", ita: "it", it: "it",
+    rus: "ru", ru: "ru", ara: "ar", ar: "ar", hin: "hi", hi: "hi",
+  };
+  return codes[normalized] ?? (normalized && normalized !== "und" ? normalized : "en");
 }
