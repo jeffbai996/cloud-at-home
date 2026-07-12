@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeCueText, captionFontSize, captionVerticalOffset, formatPlaybackStats, isResumable, mediaYearLabel, pauseCinemaVisible, playbackStartPosition, progressEvents, resumePosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, webPlaybackProfile } from "./playback";
+import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionVerticalOffset, formatPlaybackStats, isResumable, mediaYearLabel, pauseCinemaVisible, playbackStartPosition, progressEvents, resumePosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, webPlaybackProfile } from "./playback";
 
 describe("web playback capabilities", () => {
   it("direct-plays browser-safe video and transcodes incompatible containers or audio to HLS", () => {
@@ -44,6 +44,14 @@ describe("player preferences", () => {
     expect(usesNativeVideoFullscreen("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X)")).toBe(true);
     expect(usesNativeVideoFullscreen("Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X)")).toBe(false);
     expect(usesNativeVideoFullscreen("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")).toBe(false);
+  });
+
+  it("explains that direct AirPlay on a Mac requires Safari", () => {
+    expect(airPlayNoticeDurationMs).toBe(5_000);
+    expect(airPlayUnavailableMessage("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/140 Safari/537.36"))
+      .toBe("Direct AirPlay requires Safari on this Mac. Open this page in Safari or use Screen Mirroring.");
+    expect(airPlayUnavailableMessage("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140 Safari/537.36"))
+      .toBe("AirPlay is not available in this browser.");
   });
 
   it("enters pause cinema only after ten seconds and leaves immediately", () => {

@@ -7,6 +7,8 @@ export const progressEvents = [
   "teardown",
 ] as const;
 
+export const airPlayNoticeDurationMs = 5_000;
+
 export function captionFontSize(value?: number): number {
   if (!Number.isFinite(value)) return 75;
   return Math.min(200, Math.max(0, value as number));
@@ -19,6 +21,12 @@ export function captionVerticalOffset(value?: number): number {
 
 export function usesNativeVideoFullscreen(userAgent: string): boolean {
   return /iPhone|iPod/.test(userAgent);
+}
+
+export function airPlayUnavailableMessage(userAgent: string): string {
+  return /Macintosh|Mac OS X/.test(userAgent)
+    ? "Direct AirPlay requires Safari on this Mac. Open this page in Safari or use Screen Mirroring."
+    : "AirPlay is not available in this browser.";
 }
 
 export function pauseCinemaVisible(paused: boolean, elapsedMs: number): boolean {

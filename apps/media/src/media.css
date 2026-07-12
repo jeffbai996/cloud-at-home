@@ -285,6 +285,7 @@
 .subtitle-layer { position: absolute; z-index: 8; left: 10%; right: 10%; color: #fff; text-align: center; white-space: pre-line; font-family: Inter, sans-serif; font-weight: 600; text-shadow: 0 2px 4px #000, 0 0 2px #000; pointer-events: none; transform: translateZ(0); }
 .subtitle-layer span { padding: .08em .26em .14em; border-radius: .18em; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .player-error { position: absolute; top: 20px; left: 50%; z-index: 10; transform: translateX(-50%); padding: 10px 14px; border-radius: 10px; background: rgba(150,20,20,.85); }
+.player-notice { background: rgba(34,36,40,.94); color: rgba(255,255,255,.9); box-shadow: 0 10px 30px rgba(0,0,0,.32); }
 .player-settings { display: grid; gap: 18px; }
 .player-settings-polished { width: min(460px, 78vw); box-sizing: border-box; margin-inline: auto; gap: 16px; }
 .settings-intro { display: flex; align-items: center; gap: 13px; padding: 14px; border: 1px solid rgba(255,255,255,.08); border-radius: 15px; background: rgba(255,255,255,.035); }

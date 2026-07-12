@@ -20,7 +20,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { Button, Modal } from "@cloud-at-home/ui";
 import { createStreamTicket, getPlaybackInfo, getSeriesEpisodes, imageUrl, loadSubtitleTrack, reportPlayback, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
-import { activeCueText, captionFontSize, captionVerticalOffset, formatPlaybackStats, mediaYearLabel, playbackStartPosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, type TrickplayInfo } from "./playback";
+import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionVerticalOffset, formatPlaybackStats, mediaYearLabel, playbackStartPosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, type TrickplayInfo } from "./playback";
 
 type SafariVideo = HTMLVideoElement & {
   webkitShowPlaybackTargetPicker?: () => void;
@@ -30,7 +30,6 @@ type SafariVideo = HTMLVideoElement & {
   webkitSupportsPresentationMode?: (mode: string) => boolean;
   webkitSetPresentationMode?: (mode: "inline" | "fullscreen" | "picture-in-picture") => void;
   getVideoPlaybackQuality?: () => { droppedVideoFrames: number; totalVideoFrames: number };
-  remote?: { prompt?: () => Promise<void> };
 };
 
 type SafariFullscreenElement = HTMLDivElement & {
@@ -118,6 +117,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const [seeking, setSeeking] = useState(false);
   const [seekTarget, setSeekTarget] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [statsOpen, setStatsOpen] = useState(false);
   const [viewportFullscreen, setViewportFullscreen] = useState(false);
   const [, setStatsEpoch] = useState(0);
@@ -155,6 +155,11 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     const timer = window.setInterval(() => setStatsEpoch((value) => value + 1), 1_000);
     return () => window.clearInterval(timer);
   }, [settings]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), airPlayNoticeDurationMs);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   useEffect(() => () => {
     if (transportTimerRef.current !== null) window.clearTimeout(transportTimerRef.current);
     if (controlsTimerRef.current !== null) window.clearTimeout(controlsTimerRef.current);
@@ -527,19 +532,13 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   function showAirPlayPicker() {
     const video = videoRef.current;
     if (!video) return;
-    setError("");
+    setNotice("");
     if (typeof video.webkitShowPlaybackTargetPicker === "function") {
       try { video.webkitShowPlaybackTargetPicker(); }
-      catch { setError("Could not open AirPlay. Check that AirPlay is enabled on this Mac."); }
+      catch { setNotice("Could not open AirPlay. Check that AirPlay is enabled on this Mac."); }
       return;
     }
-    if (typeof video.remote?.prompt === "function") {
-      void video.remote.prompt().catch((reason: { name?: string }) => {
-        if (reason?.name !== "AbortError") setError("Could not open wireless playback. Please try again.");
-      });
-      return;
-    }
-    setError("AirPlay is available in Safari on this Mac.");
+    setNotice(airPlayUnavailableMessage(navigator.userAgent));
   }
 
   function toggleFullscreen() {
@@ -694,6 +693,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
         )}
       </AnimatePresence>
       {error && <div className="player-error">{error}</div>}
+      {notice && <div className="player-error player-notice" role="status">{notice}</div>}
       <Modal open={settings === "captions"} title="Subtitles" onClose={() => setSettings(null)}>
         <div className="player-settings player-settings-polished">
           <div className="settings-intro"><Captions /><div><strong>Caption appearance</strong><span>Saved automatically on this device</span></div></div>
