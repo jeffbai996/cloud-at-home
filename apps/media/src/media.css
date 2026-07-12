@@ -149,7 +149,7 @@
 .details-facts { min-width: 0; display: flex; flex-wrap: nowrap; gap: 7px; margin-top: 17px; }
 .details-facts > span { min-height: 32px; display: inline-flex; align-items: center; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.025)); color: var(--muted); font: 650 11px "Plus Jakarta Sans", sans-serif; }
 .details-facts .community-rating-star { display: inline-block; margin-right: 5px; color: #f5c84c; font-style: normal; transform: translateY(-.5px); }
-.details-facts .community-rating, .details-facts .critic-rating { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.details-facts .community-rating, .details-facts .critic-rating { color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 .details-facts .critic-rating { gap: 5px; }
 .details-facts .score-pill { position: relative; cursor: help; outline: 0; }
 .details-facts .score-pill:focus-visible { border-color: rgba(255,255,255,.24); box-shadow: 0 0 0 3px rgba(255,255,255,.06); }
@@ -166,15 +166,15 @@
 .details-facts .rating-classification { position: relative; padding: 0; border: 0; background: transparent; overflow: visible; user-select: none; }
 .details-facts .rating-badge { min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 0 7px; border: 1px solid var(--rating-edge, rgba(255,255,255,.5)); color: color-mix(in srgb, var(--rating-edge) 28%, white); font: 800 13.5px/1 Inter, "Plus Jakarta Sans", sans-serif; letter-spacing: -.07em; text-indent: -.5px; font-variant-numeric: tabular-nums; box-shadow: 0 5px 14px rgba(0,0,0,.2); transform: translateY(-.25px); cursor: default; }
 .details-facts .rating-badge:focus-visible { outline: 2px solid #ffad5e; outline-offset: 4px; }
-.details-facts .rating-badge-ca { width: 32px; min-width: 32px; height: 32px; padding: 0; font-family: "DM Sans", sans-serif; font-size: 14.5px; font-weight: 700; letter-spacing: 0; }
+.details-facts .rating-badge-ca { width: 32px; min-width: 32px; height: 32px; padding: 0; font-family: Inter, "Plus Jakarta Sans", sans-serif; font-size: 14.5px; font-weight: 700; letter-spacing: 0; }
 .details-facts .rating-badge-content { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; }
-.details-facts .rating-badge-ca, .details-facts .rating-badge-us-film { -webkit-text-stroke: .2px rgba(0,0,0,.58); paint-order: stroke fill; }
+.details-facts .rating-badge-ca, .details-facts .rating-badge-us-film { -webkit-text-stroke: .5px rgba(0,0,0,.58); paint-order: stroke fill; }
 .details-facts .rating-badge-base, .details-facts .rating-badge-accompaniment { padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; }
 .details-facts .rating-badge-base { line-height: 1; transform: translateY(1.35px); }
 .details-facts .rating-badge-accompaniment { align-self: flex-start; margin: 8.75px 0 0 1.5px; font-size: .58em; font-weight: 700; line-height: 1; }
 .details-facts .rating-badge-circle { border-radius: 50%; }
 .details-facts .rating-badge-rounded { border-radius: 8px; }
-.details-facts .rating-badge-hex { position: relative; width: 36px; min-width: 36px; height: 34px; border: 0; background: transparent; box-shadow: none; letter-spacing: 0; }
+.details-facts .rating-badge-hex { position: relative; width: 36px; min-width: 36px; height: 34px; border: 0; background: transparent; box-shadow: none; font-family: "DM Sans", sans-serif; letter-spacing: 0; }
 .details-facts .rating-badge-hex::before { content: ""; position: absolute; inset: 0; background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 34'%3E%3Cpath d='M10 1 Q8.5 1 7.5 2.5 L1.2 15.5 Q.5 17 1.2 18.5 L7.5 31.5 Q8.5 33 10 33 H26 Q27.5 33 28.5 31.5 L34.8 18.5 Q35.5 17 34.8 15.5 L28.5 2.5 Q27.5 1 26 1 Z' fill='%23278cf5' stroke='%23e8f4ff' stroke-width='1.25' stroke-linejoin='round'/%3E%3C/svg%3E"); }
 .details-facts .rating-badge-hex > * { position: relative; z-index: 1; }
 .details-facts .rating-badge-triangle { position: relative; width: 42px; min-width: 42px; height: 39px; border: 0; background: transparent; box-shadow: none; font-family: "DM Sans", sans-serif; font-size: 12.5px; font-weight: 700; }
