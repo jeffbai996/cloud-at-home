@@ -168,6 +168,7 @@
 .details-facts .rating-badge:focus-visible { outline: 2px solid #ffad5e; outline-offset: 4px; }
 .details-facts .rating-badge-ca { width: 32px; min-width: 32px; height: 32px; padding: 0; font-family: "DM Sans", sans-serif; font-size: 14.5px; font-weight: 700; letter-spacing: 0; }
 .details-facts .rating-badge-content { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; }
+.details-facts .rating-badge-ca, .details-facts .rating-badge-us-film { -webkit-text-stroke: .2px rgba(0,0,0,.58); paint-order: stroke fill; }
 .details-facts .rating-badge-base, .details-facts .rating-badge-accompaniment { padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; }
 .details-facts .rating-badge-base { line-height: 1; transform: translateY(1.35px); }
 .details-facts .rating-badge-accompaniment { align-self: flex-start; margin: 8.75px 0 0 1.5px; font-size: .58em; font-weight: 700; line-height: 1; }
@@ -178,7 +179,7 @@
 .details-facts .rating-badge-hex > * { position: relative; z-index: 1; }
 .details-facts .rating-badge-triangle { position: relative; width: 42px; min-width: 42px; height: 39px; border: 0; background: transparent; box-shadow: none; font-family: "DM Sans", sans-serif; font-size: 12.5px; font-weight: 700; }
 .details-facts .rating-badge-triangle::before { content: ""; position: absolute; inset: 1px; background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 39 36'%3E%3Cpath d='M4 3 Q2 3 3.5 6 L17.4 31 Q19.5 34 21.6 31 L35.5 6 Q37 3 34 3 Z' fill='%23e57220' stroke='%23ffc994' stroke-width='1.25' stroke-linejoin='round'/%3E%3C/svg%3E"); filter: drop-shadow(0 5px 7px rgba(0,0,0,.22)); }
-.details-facts .rating-badge-triangle .rating-badge-content { transform: translateY(-4.1px); }
+.details-facts .rating-badge-triangle .rating-badge-content { transform: translateY(-4.35px); }
 .details-facts .rating-badge-triangle .rating-badge-base { transform: none; }
 .details-facts .rating-badge-triangle .rating-badge-accompaniment { align-self: auto; margin: 0 0 0 .6px; font-size: .64em; font-weight: 700; transform: translateY(-2.75px); }
 .details-facts .rating-badge-octagon { clip-path: polygon(29% 0, 71% 0, 100% 29%, 100% 71%, 71% 100%, 29% 100%, 0 71%, 0 29%); }
@@ -200,7 +201,7 @@
 .details-facts .rating-classification:hover .rating-card, .details-facts .rating-classification:focus-within .rating-card { opacity: 1; pointer-events: auto; transform: translate(0, 0) scale(1); }
 .details-facts .rating-card-heading { display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: inherit; }
 .details-facts .rating-card-icon { flex: 0 0 auto; transform: none; box-shadow: none; cursor: default; }
-.rating-card-heading strong { color: #fff; font: 750 14px "Plus Jakarta Sans", sans-serif; letter-spacing: -.025em; }
+.rating-card-heading strong { color: #fff; font: 750 16px "Plus Jakarta Sans", sans-serif; letter-spacing: -.025em; }
 .details-facts .rating-card-copy { padding: 0; border: 0; background: none; color: rgba(255,255,255,.88); font: 500 12px/1.5 "Plus Jakarta Sans", sans-serif; }
 .details-facts .rating-card a, .details-facts .rating-card-authority { width: fit-content; display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: none; color: rgba(255,173,94,.88); font: 650 10px "Plus Jakarta Sans", sans-serif; text-decoration: none; }
 .details-facts .rating-card a:hover { color: #ffc27f; text-decoration: underline; }
