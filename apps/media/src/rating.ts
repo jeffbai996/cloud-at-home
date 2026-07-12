@@ -51,8 +51,8 @@ const mpaGuidance: Record<string, RatingGuidance> = {
 
 const canadianTones: Record<string, RatingBadge["tone"]> = {
   G: "green",
-  PG: "yellow",
-  "14A": "blue",
+  PG: "blue",
+  "14A": "yellow",
   "18A": "orange",
   R: "red",
   A: "red",
@@ -61,7 +61,7 @@ const canadianTones: Record<string, RatingBadge["tone"]> = {
 const canadianShapes: Record<string, RatingBadge["shape"]> = {
   G: "circle",
   PG: "rounded",
-  "14A": "hex",
+  "14A": "triangle",
   "18A": "triangle",
   R: "circle",
   A: "circle",

@@ -5,8 +5,8 @@ import { ratingBadge } from "./rating";
 describe("ratingBadge", () => {
   it.each([
     ["CA-G", { label: "G", scheme: "ca", shape: "circle", tone: "green" }],
-    ["CA-PG", { label: "PG", scheme: "ca", shape: "rounded", tone: "yellow" }],
-    ["CA-14A", { label: "14A", scheme: "ca", shape: "hex", tone: "blue" }],
+    ["CA-PG", { label: "PG", scheme: "ca", shape: "rounded", tone: "blue" }],
+    ["CA-14A", { label: "14A", scheme: "ca", shape: "triangle", tone: "yellow" }],
     ["CA-18A", { label: "18A", scheme: "ca", shape: "triangle", tone: "orange" }],
     ["CA-R", { label: "R", scheme: "ca", shape: "circle", tone: "red" }],
     ["CA-A", { label: "A", scheme: "ca", shape: "circle", tone: "red" }],

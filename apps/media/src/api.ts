@@ -19,6 +19,7 @@ export type MediaItem = {
   Genres?: string[];
   Studios?: Array<{ Name: string }>;
   ProductionLocations?: string[];
+  ProviderIds?: Record<string, string>;
   RunTimeTicks?: number;
   IndexNumber?: number;
   ParentIndexNumber?: number;
@@ -171,7 +172,7 @@ export async function loadSubtitleTrack(itemId: string, sourceId: string, index:
 }
 
 export async function loadHome(userId: string) {
-  const fields = "Overview,PrimaryImageAspectRatio,MediaSources,DateCreated,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,OfficialRating,CommunityRating,CriticRating";
+  const fields = "Overview,PrimaryImageAspectRatio,MediaSources,DateCreated,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,ProviderIds,OfficialRating,CommunityRating,CriticRating";
   const [resume, latest, movies, series] = await Promise.all([
     mediaRequest<{ Items: MediaItem[] }>(`Users/${userId}/Items/Resume?Limit=20&MediaTypes=Video&Fields=${fields}`),
     mediaRequest<MediaItem[]>(`Users/${userId}/Items/Latest?Limit=24&IncludeItemTypes=Movie,Episode&Fields=${fields}`),
@@ -218,7 +219,7 @@ export async function removeWatchHistoryItem(userId: string, itemId: string): Pr
 export async function search(userId: string, term: string): Promise<MediaItem[]> {
   if (!term.trim()) return [];
   const result = await mediaRequest<{ Items: MediaItem[] }>(
-    `Users/${userId}/Items?Recursive=true&IncludeItemTypes=Movie,Series,Episode&SearchTerm=${encodeURIComponent(term)}&Limit=40&Fields=Overview,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,OfficialRating,CommunityRating,CriticRating`,
+    `Users/${userId}/Items?Recursive=true&IncludeItemTypes=Movie,Series,Episode&SearchTerm=${encodeURIComponent(term)}&Limit=40&Fields=Overview,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,ProviderIds,OfficialRating,CommunityRating,CriticRating`,
   );
   return result.Items ?? [];
 }
@@ -228,7 +229,7 @@ export function episodesForSeries(items: MediaItem[], seriesId: string): MediaIt
 }
 
 export async function getSeriesEpisodes(seriesId: string, userId: string): Promise<MediaItem[]> {
-  const fields = "Overview,PrimaryImageAspectRatio,Genres,Studios,ProductionLocations,OfficialRating,CommunityRating,CriticRating,SeriesId,SeriesName";
+  const fields = "Overview,PrimaryImageAspectRatio,Genres,Studios,ProductionLocations,ProviderIds,OfficialRating,CommunityRating,CriticRating,SeriesId,SeriesName";
   try {
     const result = await mediaRequest<{ Items: MediaItem[] }>(
       `Shows/${seriesId}/Episodes?UserId=${encodeURIComponent(userId)}&Fields=${fields}&EnableUserData=true`,
@@ -247,7 +248,7 @@ export async function getSeriesEpisodes(seriesId: string, userId: string): Promi
 
 export async function getMediaItem(itemId: string, userId: string): Promise<MediaItem> {
   return mediaRequest<MediaItem>(
-    `Users/${encodeURIComponent(userId)}/Items/${encodeURIComponent(itemId)}?Fields=Overview,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,OfficialRating,CommunityRating,CriticRating`,
+    `Users/${encodeURIComponent(userId)}/Items/${encodeURIComponent(itemId)}?Fields=Overview,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,ProviderIds,OfficialRating,CommunityRating,CriticRating`,
   );
 }
 

@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Clapperboard, Clock3, ExternalLink, Film, Heart, House, ListPlus, LogOut, Menu, Pin, Play, Plus, RefreshCw, RotateCcw, Search, Shuffle, Trash2, Tv, X } from "lucide-react";
+import { Check, ChevronDown, Clapperboard, Clock3, ExternalLink, Film, Flag, Heart, House, ListPlus, LogOut, Menu, Pin, Play, Plus, RefreshCw, RotateCcw, Search, Shuffle, Trash2, Tv, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
@@ -7,6 +7,7 @@ import { clearWatchHistory, getMediaItem, getSeriesEpisodes, getSession, imageUr
 import { Player } from "./Player";
 import { createMediaList, MAX_LIST_NAME_LENGTH, normalizeListName, toggleListItem, validPromotedListId, type MediaList } from "./lists";
 import { mobileHeaderScrollIntent } from "./mobileHeader";
+import { countryPresentation, scoreSource, type ScoreKind } from "./mediaMetadata";
 import { isResumable } from "./playback";
 import { ratingBadge } from "./rating";
 import { buildMovieShelves } from "./shelves";
@@ -423,6 +424,7 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
   const [loadingEpisodes, setLoadingEpisodes] = useState(item.Type === "Series");
   const [listPicker, setListPicker] = useState(false);
   const [historyState, setHistoryState] = useState<"idle" | "removing" | "error">("idle");
+  const [artLoaded, setArtLoaded] = useState(false);
   const minutes = runtimeMinutes(item);
   const hasWatchHistory = Boolean((item.UserData?.PlaybackPositionTicks ?? 0) > 0 || item.UserData?.Played);
   const nextEpisode = episodes.find((episode) => !episode.UserData?.Played) ?? episodes[0];
@@ -432,7 +434,7 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
   const primaryLabel = resumable ? "Resume" : item.Type === "Series" ? "Play next" : "Play";
   const genrePills = (item.Genres ?? []).slice(0, 2);
   const studioPill = item.Studios?.[0]?.Name;
-  const countryPill = formatProductionLocation(item.ProductionLocations?.[0]);
+  const countryPill = countryPresentation(item.ProductionLocations?.[0]);
   const seasons = useMemo(() => {
     const grouped = new Map<number, MediaItem[]>();
     for (const episode of episodes) {
@@ -455,9 +457,9 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
   }, [item.Id, item.Type, userId]);
 
   return (
-    <motion.div className="details-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={onClose}>
-      <motion.article className={`details-card ${item.Type === "Series" ? "details-card-series" : ""}`} layoutId={`media-${item.Id}`} initial={{ y: 40, scale: .97 }} animate={{ y: 0, scale: 1 }} exit={{ y: 26, opacity: 0 }} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="details-art" style={{ backgroundImage: `linear-gradient(0deg, var(--surface) 0%, transparent 65%), url(${imageUrl(item, art, 1300)})` }}><button className="details-close icon-button" aria-label="Close details" onClick={onClose}><X /></button></div>
+    <motion.div className="details-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .24, ease: [0.22, 1, 0.36, 1] }} onMouseDown={onClose}>
+      <motion.article className={`details-card ${item.Type === "Series" ? "details-card-series" : ""}`} initial={{ y: 28, scale: .982, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} exit={{ y: 16, scale: .992, opacity: 0 }} transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }} onMouseDown={(event) => event.stopPropagation()}>
+        <div className={`details-art ${artLoaded ? "is-loaded" : ""}`}><img className="details-art-image" src={imageUrl(item, art, 1300)} alt="" onLoad={() => setArtLoaded(true)} /><span className="details-art-shade" /><button className="details-close icon-button" aria-label="Close details" onClick={onClose}><X /></button></div>
         <div className="details-copy">
           <span className="eyebrow">{item.Type}</span>
           <h1>{item.Name}</h1>
@@ -466,18 +468,18 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
           <div className="details-actions">
             <Button className="details-play" disabled={item.Type === "Series" && !nextEpisode} onClick={() => onPlay(withSeriesMetadata(playTarget, item), false)}><Play size={18} fill="currentColor" /> {primaryLabel}</Button>
             {resumable && <Button className="details-start-over" variant="secondary" onClick={() => onPlay(withSeriesMetadata(playTarget, item), true)}><RotateCcw size={17} /> Play from beginning</Button>}
-            <Button className={`details-list details-favorite ${favorite ? "active" : ""}`} variant="ghost" onClick={onToggleFavorite}><Heart size={17} fill={favorite ? "currentColor" : "none"} />{favorite ? "Favorited" : "Add to favorites"}</Button>
-            <Button className="details-list details-add-list" variant="ghost" onClick={() => lists.length ? setListPicker(true) : onManageLists()}><ListPlus size={17} />{lists.length ? "Add to list" : "Create a list"}</Button>
-            {hasWatchHistory && <Button className="details-list details-remove-history" variant="ghost" disabled={historyState === "removing"} onClick={() => { setHistoryState("removing"); void onRemoveHistory().then(() => setHistoryState("idle")).catch(() => setHistoryState("error")); }}><Trash2 size={16} />{historyState === "removing" ? "Removing…" : historyState === "error" ? "Try removing again" : "Remove from history"}</Button>}
+            <Button className={`details-list details-favorite ${favorite ? "active" : ""}`} variant="ghost" onClick={onToggleFavorite}><Heart size={17} fill={favorite ? "currentColor" : "none"} /><span>{favorite ? "Favorited" : "Add to favorites"}</span></Button>
+            <Button className="details-list details-add-list" variant="ghost" onClick={() => lists.length ? setListPicker(true) : onManageLists()}><ListPlus size={17} /><span>{lists.length ? "Add to list" : "Create a list"}</span></Button>
+            {hasWatchHistory && <Button className="details-list details-remove-history" variant="ghost" disabled={historyState === "removing"} onClick={() => { setHistoryState("removing"); void onRemoveHistory().then(() => setHistoryState("idle")).catch(() => setHistoryState("error")); }}><Trash2 size={16} /><span>{historyState === "removing" ? "Removing…" : historyState === "error" ? "Try removing again" : "Remove from history"}</span></Button>}
           </div>
           {resumable && <div className="details-progress"><div><strong>{watched}% watched</strong><span>{playTarget.Type === "Episode" ? playTarget.Name : `${Math.max(1, Math.round((playTarget.UserData?.PlaybackPositionTicks ?? 0) / 600_000_000))} min in`}</span></div><div><i style={{ width: `${Math.min(100, watched)}%` }} /></div></div>}
           <div className="details-facts">
             {item.OfficialRating && <OfficialRating value={item.OfficialRating} />}
-            {item.CommunityRating && <ScorePill kind="community" value={item.CommunityRating.toFixed(1)} />}
-            {item.CriticRating != null && <ScorePill kind="critic" value={`${Math.round(item.CriticRating)}%`} />}
+            {item.CommunityRating && <ScorePill kind="community" value={item.CommunityRating.toFixed(1)} providerIds={item.ProviderIds} />}
+            {item.CriticRating != null && <ScorePill kind="critic" value={`${Math.round(item.CriticRating)}%`} providerIds={item.ProviderIds} />}
+            {countryPill && <span className="country-pill" tabIndex={0} aria-label={`Production country: ${countryPill.label}`}><CountryFlag code={countryPill.code} /><span className="country-pill-label">{countryPill.label}</span></span>}
             {genrePills.map((genre) => <span className="details-category details-category-genre" key={genre}><span className="details-category-label">{genre}</span></span>)}
             {studioPill && <span className="details-category details-category-context details-category-studio" title={studioPill}><span className="details-category-label">{studioPill}</span></span>}
-            {countryPill && <span className="details-category details-category-context details-category-country" title={countryPill}><span className="details-category-label">{countryPill}</span></span>}
             {!item.OfficialRating && !item.CommunityRating && item.CriticRating == null && !genrePills.length && !studioPill && !countryPill && <span className="details-category"><span className="details-category-label">{item.Type === "Series" ? "Serialized drama" : "Feature presentation"}</span></span>}
           </div>
         </div>
@@ -570,24 +572,30 @@ function formatCompactMinutes(minutes: number): string {
   return remainder ? `${Math.floor(minutes / 60)}h ${remainder}m` : `${minutes / 60}h`;
 }
 
-function formatProductionLocation(value?: string): string | undefined {
-  if (!value) return undefined;
-  return /^(US|USA|United States of America)$/i.test(value.trim()) ? "United States" : value;
-}
-
-function ScorePill({ kind, value }: { kind: "community" | "critic"; value: string }) {
+function ScorePill({ kind, value, providerIds }: { kind: ScoreKind; value: string; providerIds?: Record<string, string> }) {
   const tooltipId = useId();
   const critic = kind === "critic";
+  const source = scoreSource(kind, providerIds);
   return (
     <span className={`${kind}-rating score-pill`} tabIndex={0} aria-describedby={tooltipId} aria-label={`${critic ? "Tomatometer" : "IMDb rating"} ${value}`}>
       {critic ? <TomatoMark /> : <i className="community-rating-star" aria-hidden="true">★</i>}
       {value}
       <span className="score-tooltip" id={tooltipId} role="tooltip">
-        <strong>{critic ? "Tomatometer" : "IMDb rating"}</strong>
-        <small>{critic ? "Critic score supplied by Jellyfin metadata." : "Viewer rating supplied by Jellyfin metadata."}</small>
+        <span className="score-tooltip-heading"><strong>{source.label}</strong><b>{value}</b></span>
+        <small>{source.description}</small>
+        {source.href && <a href={source.href} target="_blank" rel="noreferrer">View title on {critic ? "Rotten Tomatoes" : "IMDb"}<ExternalLink aria-hidden="true" /></a>}
       </span>
     </span>
   );
+}
+
+function CountryFlag({ code }: { code?: string }) {
+  if (code === "US") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#fff"/><path fill="#d64b55" d="M0 0h28v2H0zm0 4h28v2H0zm0 4h28v2H0zm0 4h28v2H0zm0 4h28v2H0z"/><path fill="#365899" d="M0 0h12v10H0z"/><path fill="#fff" d="m2 2 .4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2zm4 0 .4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2zm4 0 .4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2zM4 6l.4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2zm4 0 .4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2z"/></svg>;
+  if (code === "CA") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#fff"/><path fill="#d52b3f" d="M0 0h6v20H0zm22 0h6v20h-6zM14 3l1.2 3 2.4-1.2-.7 2.8 2 .9-3.4 2.7.8 2.2-2.3-.5-2.3.5.8-2.2-3.4-2.7 2-.9-.7-2.8L12.8 6z"/></svg>;
+  if (code === "GB") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#24468f"/><path stroke="#fff" strokeWidth="4" d="m0 0 28 20M28 0 0 20"/><path stroke="#d53b4b" strokeWidth="1.8" d="m0 0 28 20M28 0 0 20"/><path fill="#fff" d="M11 0h6v20h-6zM0 7h28v6H0z"/><path fill="#d53b4b" d="M12 0h4v20h-4zM0 8h28v4H0z"/></svg>;
+  if (code === "JP") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#fff"/><circle cx="14" cy="10" r="5" fill="#c82f45"/></svg>;
+  if (code === "CN" || code === "HK") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#d62f3e"/><path fill="#ffd34e" d="m7 4 1 2h2l-1.6 1.3L9 9.5 7 8.2 5 9.5l.6-2.2L4 6h2z"/></svg>;
+  return <span className="country-flag country-flag-generic" aria-hidden="true"><Flag size={15} /></span>;
 }
 
 function TomatoMark() {
@@ -604,7 +612,8 @@ function OfficialRating({ value }: { value: string }) {
   const tooltipId = useId();
   const letterClassName = badge.scheme === "us-film" && badge.label === "G"
     ? " rating-badge-letter-g"
-    : badge.scheme === "ca" && badge.label === "R" ? " rating-badge-letter-r" : "";
+    : badge.scheme === "ca" && badge.label === "R" ? " rating-badge-letter-r"
+    : badge.scheme === "ca" && badge.label === "PG" ? " rating-badge-letter-pg" : "";
   const badgeClassName = `rating-badge rating-badge-${badge.scheme} rating-badge-${badge.shape} rating-badge-${badge.tone}${letterClassName}`;
   return (
     <span className="rating-classification">
@@ -627,7 +636,6 @@ function SearchGlyph({ size = 17 }: { size?: number }) {
 function RatingBadgeLabel({ scheme, label }: { scheme: string; label: string }) {
   const accompaniment = scheme === "ca" && /^(14|18)A$/.exec(label);
   if (!accompaniment) return <>{label}</>;
-  if (accompaniment[1] === "14") return <><span className="rating-badge-base">14</span><sup className="rating-badge-accompaniment">A</sup></>;
   return <span className="rating-badge-content"><span className="rating-badge-base">{accompaniment[1]}</span><sup className="rating-badge-accompaniment">A</sup></span>;
 }
 
