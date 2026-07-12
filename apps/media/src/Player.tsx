@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { Button, Modal } from "@cloud-at-home/ui";
@@ -556,10 +557,19 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       if (typeof video?.webkitEnterFullscreen === "function") {
         try {
           const track = subtitleTrackRef.current?.track;
+          nativeFullscreenRef.current = true;
+          flushSync(() => setCue(""));
           if (track && subtitleIndex !== null) track.mode = "showing";
           video.webkitEnterFullscreen();
         }
-        catch { setViewportFullscreen(true); window.scrollTo(0, 0); }
+        catch {
+          nativeFullscreenRef.current = false;
+          const track = subtitleTrackRef.current?.track;
+          if (track && subtitleIndex !== null) track.mode = "hidden";
+          syncSubtitleCue();
+          setViewportFullscreen(true);
+          window.scrollTo(0, 0);
+        }
       } else {
         setViewportFullscreen(true);
         window.scrollTo(0, 0);

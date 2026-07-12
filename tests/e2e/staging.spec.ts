@@ -346,6 +346,25 @@ test("Cloud Media player shows a streaming-style time preview", async ({ page })
   await page.locator("video").evaluate((video) => video.dispatchEvent(new Event("webkitendfullscreen")));
   await expect.poll(() => page.locator("video track").evaluate((track: HTMLTrackElement) => track.track.mode)).toBe("hidden");
   await expect(page.locator(".subtitle-layer")).toHaveText("First cue");
+  await page.locator("video").evaluate((video) => {
+    document.body.dataset.originalUserAgent = navigator.userAgent;
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X)" });
+    Object.defineProperty(video, "webkitEnterFullscreen", {
+      configurable: true,
+      value: () => {
+        document.body.dataset.customSubtitleAtNativeEntry = String(Boolean(document.querySelector(".subtitle-layer")));
+        document.body.dataset.nativeSubtitleModeAtEntry = video.querySelector("track")?.track.mode ?? "missing";
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Enter fullscreen" }).click();
+  await expect(page.locator("body")).toHaveAttribute("data-custom-subtitle-at-native-entry", "false");
+  await expect(page.locator("body")).toHaveAttribute("data-native-subtitle-mode-at-entry", "showing");
+  await page.locator("video").evaluate((video) => {
+    video.dispatchEvent(new Event("webkitendfullscreen"));
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: document.body.dataset.originalUserAgent });
+  });
+  await expect(page.locator(".subtitle-layer")).toHaveText("First cue");
   await page.locator(".player-shell").evaluate((shell) => {
     Object.defineProperty(shell, "requestFullscreen", {
       configurable: true,
