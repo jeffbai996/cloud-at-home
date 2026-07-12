@@ -168,7 +168,7 @@
 .details-facts .rating-badge:focus-visible { outline: 2px solid #ffad5e; outline-offset: 4px; }
 .details-facts .rating-badge-ca { width: 32px; min-width: 32px; height: 32px; padding: 0; font-family: Inter, "Plus Jakarta Sans", sans-serif; font-size: 14.5px; font-weight: 700; letter-spacing: 0; }
 .details-facts .rating-badge-content { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; }
-.details-facts .rating-badge-ca, .details-facts .rating-badge-us-film { -webkit-text-stroke: .5px rgba(0,0,0,.58); paint-order: stroke fill; }
+.details-facts .rating-badge-ca.rating-badge-circle, .details-facts .rating-badge-us-film { -webkit-text-stroke: .25px rgba(48,50,54,.82); paint-order: stroke fill; }
 .details-facts .rating-badge-base, .details-facts .rating-badge-accompaniment { padding: 0; border: 0; border-radius: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; }
 .details-facts .rating-badge-base { line-height: 1; transform: translateY(1.35px); }
 .details-facts .rating-badge-accompaniment { align-self: flex-start; margin: 8.75px 0 0 1.5px; font-size: .58em; font-weight: 700; line-height: 1; }
