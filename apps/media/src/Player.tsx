@@ -561,11 +561,6 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     }
     const shell = shellRef.current;
     if (!shell) return;
-    if (isAppleTouchDevice()) {
-      setViewportFullscreen(true);
-      window.scrollTo(0, 0);
-      return;
-    }
     const request = shell.requestFullscreen?.bind(shell) ?? shell.webkitRequestFullscreen?.bind(shell);
     if (!request) {
       setViewportFullscreen(true);
@@ -639,10 +634,10 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
             <div className="pause-cinema-shade" />
             <div className="pause-cinema-copy">
               <div className="pause-cinema-heading">
-                <motion.h1 layoutId={`player-title-${item.Id}`} initial={reduceMotion ? false : { opacity: 0, x: -22 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: reduceMotion ? 0 : .12, duration: reduceMotion ? 0 : .55, ease: [0.22, 1, 0.36, 1] }}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <motion.small initial={reduceMotion ? false : { opacity: 0, x: -18, scale: .96 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ delay: reduceMotion ? 0 : .42, duration: reduceMotion ? 0 : .5, ease: [0.22, 1, 0.36, 1] }}>{yearLabel}</motion.small>}</span></motion.h1>
+                <motion.h1 layoutId={`player-title-${item.Id}`} initial={reduceMotion ? false : { opacity: 0, x: -22 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: reduceMotion ? 0 : .12, duration: reduceMotion ? 0 : .58, ease: [0.22, 1, 0.36, 1] }}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <motion.small initial={reduceMotion ? false : { opacity: 0, x: -18, scale: .96 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ delay: reduceMotion ? 0 : .62, duration: reduceMotion ? 0 : .56, ease: [0.22, 1, 0.36, 1] }}>{yearLabel}</motion.small>}</span></motion.h1>
               </div>
-              {item.SeriesName && <motion.h2 initial={reduceMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : .56, duration: reduceMotion ? 0 : .48, ease: [0.22, 1, 0.36, 1] }}>{item.Name}</motion.h2>}
-              {item.Overview && <motion.p initial={reduceMotion ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : .68, duration: reduceMotion ? 0 : .56, ease: [0.22, 1, 0.36, 1] }}>{item.Overview}</motion.p>}
+              {item.SeriesName && <motion.h2 initial={reduceMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : 1.12, duration: reduceMotion ? 0 : .56, ease: [0.22, 1, 0.36, 1] }}>{item.Name}</motion.h2>}
+              {item.Overview && <motion.p initial={reduceMotion ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : (item.SeriesName ? 1.62 : 1.12), duration: reduceMotion ? 0 : .62, ease: [0.22, 1, 0.36, 1] }}>{item.Overview}</motion.p>}
             </div>
           </motion.div>
         )}
@@ -654,9 +649,9 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
           <motion.div className="player-controls" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <div className="player-top"><button className="player-icon" aria-label="Close player" onClick={closePlayer}><X /></button>{!pauseCinema && <div><div className="player-title-line"><motion.strong layoutId={`player-title-${item.Id}`}>{item.SeriesName ?? item.Name}</motion.strong>{yearLabel && <small>{yearLabel}</small>}</div>{item.SeriesName && <span>{item.Name}</span>}</div>}</div>
             {!pauseCinema && !settings && <div className={`player-center ${transportHover ? "transport-hover" : ""}`}>
-              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime -= 10; }}><RotateCcw /><span>10</span></button>
-              <button className="play-main" onClick={() => videoRef.current?.paused ? void videoRef.current?.play() : videoRef.current?.pause()}>{playing ? <Pause /> : <Play />}</button>
-              <button onClick={() => { if (videoRef.current) videoRef.current.currentTime += 10; }}><RotateCw /><span>10</span></button>
+              <button className="seek-skip" aria-label="Rewind 10 seconds" onClick={() => { if (videoRef.current) videoRef.current.currentTime -= 10; }}><RotateCcw /><span>10</span></button>
+              <button className="play-main" onClick={() => videoRef.current?.paused ? void videoRef.current?.play() : videoRef.current?.pause()}><PlayPauseGlyph playing={playing} /></button>
+              <button className="seek-skip" aria-label="Forward 10 seconds" onClick={() => { if (videoRef.current) videoRef.current.currentTime += 10; }}><RotateCw /><span>10</span></button>
             </div>}
             <div className="player-bottom">
               <div
@@ -677,7 +672,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
                 <input className="seek" aria-label="Seek video" type="range" min={0} max={duration || 1} step="0.1" value={seekTarget ?? position} onChange={(event) => changeSeekTarget(Number(event.target.value))} />
               </div>
               <div className="player-row">
-                <button className="player-icon player-bar-play" aria-label={playing ? "Pause" : "Play"} onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()}>{playing ? <Pause /> : <Play />}</button>
+                <button className="player-icon player-bar-play" aria-label={playing ? "Pause" : "Play"} onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()}><PlayPauseGlyph playing={playing} /></button>
                 <button className="player-icon" onClick={() => { if (videoRef.current) videoRef.current.muted = !videoRef.current.muted; }}>{muted ? <VolumeX /> : <Volume2 />}</button>
                 <span className="timecode">{formatTime(position)} / {formatTime(duration)}</span>
                 <span className="player-spacer" />
@@ -733,6 +728,23 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
         </div>
       </Modal>
     </motion.div>
+  );
+}
+
+function PlayPauseGlyph({ playing }: { playing: boolean }) {
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.span
+        className="playback-glyph"
+        key={playing ? "pause" : "play"}
+        initial={{ opacity: 0, scale: .72, rotate: playing ? -8 : 8 }}
+        animate={{ opacity: 1, scale: 1, rotate: 0 }}
+        exit={{ opacity: 0, scale: .78, rotate: playing ? 8 : -8 }}
+        transition={{ duration: .22, ease: [0.22, 1, 0.36, 1] }}
+      >
+        {playing ? <Pause /> : <Play />}
+      </motion.span>
+    </AnimatePresence>
   );
 }
 
