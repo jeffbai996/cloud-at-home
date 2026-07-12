@@ -354,8 +354,8 @@
 .details-progress strong { font-weight: 800; }
 .details-facts > span { font-weight: 750; }
 .details-facts > .details-category { font-weight: 500; }
-.rating-card-heading strong { font-weight: 800; }
-.details-facts .rating-card-copy { font-weight: 600; }
+.rating-card-heading strong { font-weight: 700; }
+.details-facts .rating-card-copy { font-weight: 500; }
 .details-facts .rating-card a,
 .details-facts .rating-card-authority { font-weight: 750; }
 .episode-browser-heading h2,
