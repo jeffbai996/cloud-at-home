@@ -33,6 +33,17 @@ export function pauseCinemaVisible(paused: boolean, elapsedMs: number): boolean 
   return paused && elapsedMs >= 10_000;
 }
 
+export function pauseCinemaDelays(hasEpisode: boolean): {
+  title: number;
+  year: number;
+  episode?: number;
+  synopsis: number;
+} {
+  return hasEpisode
+    ? { title: .12, year: .82, episode: 1.52, synopsis: 2.22 }
+    : { title: .12, year: .82, synopsis: 1.52 };
+}
+
 export function shouldAutoPictureInPicture(paused: boolean, ended: boolean, readyState: number): boolean {
   return !paused && !ended && readyState >= 2;
 }

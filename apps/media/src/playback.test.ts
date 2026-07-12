@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionVerticalOffset, formatPlaybackStats, isResumable, mediaYearLabel, pauseCinemaVisible, playbackStartPosition, progressEvents, resumePosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, webPlaybackProfile } from "./playback";
+import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionVerticalOffset, formatPlaybackStats, isResumable, mediaYearLabel, pauseCinemaDelays, pauseCinemaVisible, playbackStartPosition, progressEvents, resumePosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, webPlaybackProfile } from "./playback";
 
 describe("web playback capabilities", () => {
   it("direct-plays browser-safe video and transcodes incompatible containers or audio to HLS", () => {
@@ -58,6 +58,11 @@ describe("player preferences", () => {
     expect(pauseCinemaVisible(true, 9_999)).toBe(false);
     expect(pauseCinemaVisible(true, 10_000)).toBe(true);
     expect(pauseCinemaVisible(false, 30_000)).toBe(false);
+  });
+
+  it("spaces pause cinema text entrances seven tenths of a second apart", () => {
+    expect(pauseCinemaDelays(false)).toEqual({ title: .12, year: .82, synopsis: 1.52 });
+    expect(pauseCinemaDelays(true)).toEqual({ title: .12, year: .82, episode: 1.52, synopsis: 2.22 });
   });
 
   it("enters picture in picture only for actively playing, loaded video", () => {

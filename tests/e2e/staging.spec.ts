@@ -296,7 +296,14 @@ test("Cloud Media player shows a streaming-style time preview", async ({ page })
     });
   });
   await page.goto("http://127.0.0.1:8090");
-  await expect(page.getByRole("button", { name: "Home" })).toHaveCount(0);
+  const favoritesAction = page.getByRole("button", { name: /^Favorites/ });
+  const searchAction = page.getByRole("searchbox", { name: "Search Cloud Media" });
+  const homeAction = page.getByRole("button", { name: "Home" });
+  const cinemaAction = page.getByRole("button", { name: "Cinema mode" });
+  const servicesAction = page.getByRole("button", { name: "Switch app" });
+  await expect(favoritesAction).toHaveCSS("font-weight", "600");
+  const actionOrder = await Promise.all([favoritesAction, searchAction, homeAction, cinemaAction, servicesAction].map(async (locator) => (await locator.boundingBox())!.x));
+  expect(actionOrder).toEqual([...actionOrder].sort((left, right) => left - right));
   await expect(page.locator(".brand")).toHaveAttribute("href", "/");
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.locator(".player-title-line strong")).toHaveText("Example movie");

@@ -20,7 +20,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { Button, Modal } from "@cloud-at-home/ui";
 import { createStreamTicket, getPlaybackInfo, getSeriesEpisodes, imageUrl, loadSubtitleTrack, reportPlayback, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
-import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionVerticalOffset, formatPlaybackStats, mediaYearLabel, playbackStartPosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, type TrickplayInfo } from "./playback";
+import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionVerticalOffset, formatPlaybackStats, mediaYearLabel, pauseCinemaDelays, playbackStartPosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, type TrickplayInfo } from "./playback";
 
 type SafariVideo = HTMLVideoElement & {
   webkitShowPlaybackTargetPicker?: () => void;
@@ -128,6 +128,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const pauseTitleBreak = pauseTitle.lastIndexOf(" ");
   const pauseTitleLead = pauseTitleBreak > 0 ? pauseTitle.slice(0, pauseTitleBreak + 1) : "";
   const pauseTitleTail = pauseTitleBreak > 0 ? pauseTitle.slice(pauseTitleBreak + 1) : pauseTitle;
+  const pauseDelays = pauseCinemaDelays(Boolean(item.SeriesName));
   const captionOffset = smartphoneLandscape ? captions.landscapeOffset : captions.portraitOffset;
   const subtitles = useMemo(() => source?.MediaStreams?.filter((stream) => stream.Type === "Subtitle") ?? [], [source]);
   const videoStream = source?.MediaStreams?.find((stream) => stream.Type === "Video");
@@ -640,10 +641,10 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
             <div className="pause-cinema-shade" />
             <div className="pause-cinema-copy">
               <div className="pause-cinema-heading">
-                <motion.h1 layoutId={`player-title-${item.Id}`} initial={reduceMotion ? false : { opacity: 0, x: -22 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: reduceMotion ? 0 : .12, duration: reduceMotion ? 0 : .58, ease: [0.22, 1, 0.36, 1] }}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <motion.small initial={reduceMotion ? false : { opacity: 0, x: -18, scale: .96 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ delay: reduceMotion ? 0 : .62, duration: reduceMotion ? 0 : .56, ease: [0.22, 1, 0.36, 1] }}>{yearLabel}</motion.small>}</span></motion.h1>
+                <motion.h1 layoutId={`player-title-${item.Id}`} initial={{ opacity: 0, x: reduceMotion ? 0 : -22 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: pauseDelays.title, duration: reduceMotion ? .22 : .58, ease: [0.22, 1, 0.36, 1] }}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <motion.small initial={{ opacity: 0, x: reduceMotion ? 0 : -18, scale: reduceMotion ? 1 : .96 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ delay: pauseDelays.year, duration: reduceMotion ? .22 : .56, ease: [0.22, 1, 0.36, 1] }}>{yearLabel}</motion.small>}</span></motion.h1>
               </div>
-              {item.SeriesName && <motion.h2 initial={reduceMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : 1.12, duration: reduceMotion ? 0 : .56, ease: [0.22, 1, 0.36, 1] }}>{item.Name}</motion.h2>}
-              {item.Overview && <motion.p initial={reduceMotion ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : (item.SeriesName ? 1.62 : 1.12), duration: reduceMotion ? 0 : .62, ease: [0.22, 1, 0.36, 1] }}>{item.Overview}</motion.p>}
+              {item.SeriesName && <motion.h2 initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: pauseDelays.episode, duration: reduceMotion ? .22 : .56, ease: [0.22, 1, 0.36, 1] }}>{item.Name}</motion.h2>}
+              {item.Overview && <motion.p initial={{ opacity: 0, y: reduceMotion ? 0 : 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: pauseDelays.synopsis, duration: reduceMotion ? .22 : .62, ease: [0.22, 1, 0.36, 1] }}>{item.Overview}</motion.p>}
             </div>
           </motion.div>
         )}
