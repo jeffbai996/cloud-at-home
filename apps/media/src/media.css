@@ -61,7 +61,7 @@
 .hero h1 { max-width: 18ch; margin: 10px 0 12px; font-family: "Plus Jakarta Sans"; font-size: clamp(38px, 5.6vw, 72px); line-height: .98; letter-spacing: -.055em; }
 .hero .eyebrow { font: 600 12px "Plus Jakarta Sans", sans-serif; letter-spacing: .07em; text-transform: uppercase; }
 .hero p { display: -webkit-box; max-width: 62ch; margin: 17px 0 24px; overflow: hidden; color: var(--text-2); font: 500 14px/1.6 "Plus Jakarta Sans", sans-serif; letter-spacing: -.018em; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-.hero-meta { display: flex; gap: 12px; color: var(--muted); font-size: 13px; }
+.hero-meta { display: flex; justify-content: center; gap: 12px; color: var(--muted); font-size: 13px; }
 .hero-meta span + span::before { content: "•"; margin-right: 12px; color: var(--line-strong); }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .hero-actions .button { min-height: 48px; padding-inline: 23px; border-radius: 999px; font: 700 14.5px "Plus Jakarta Sans", sans-serif; letter-spacing: -.015em; box-shadow: none; }
@@ -380,7 +380,7 @@
 .hero h1 { font-weight: 700; }
 .hero .eyebrow { font-weight: 600; }
 .hero p { font-weight: 500; }
-.hero-meta { font-weight: 400; }
+.hero-meta { font-weight: 500; }
 .hero-actions .button { font-weight: 700; }
 .media-card > strong { font-weight: 500; }
 .media-card > span { font-weight: 400; }
