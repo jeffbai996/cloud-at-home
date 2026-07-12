@@ -88,6 +88,20 @@ test("Cloud Media refresh uses a neutral boot frame without the legacy F badge",
   await expect(page.getByRole("searchbox", { name: "Search Cloud Media" })).toBeVisible();
 });
 
+test("Cloud Media treats a session service failure as an outage, not a logout", async ({ page }) => {
+  await page.route("**/api/auth/media/session", (route) => route.fulfill({
+    status: 502,
+    contentType: "application/json",
+    body: JSON.stringify({ error: "Jellyfin is unavailable" }),
+  }));
+
+  await page.goto("http://127.0.0.1:8090");
+  await expect(page.getByRole("heading", { name: "Cloud Media is temporarily unavailable" })).toBeVisible();
+  await expect(page.getByText("502: Jellyfin is unavailable")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to Cloud Media" })).toHaveCount(0);
+});
+
 test("Cloud Media header is scaled, orange, and exposes app navigation", async ({ page }) => {
   const item = { Id: "item-1", Name: "Example movie", Type: "Movie", Overview: "A sharp modern description.", RunTimeTicks: 36_000_000_000, UserData: { PlaybackPositionTicks: 6_000_000_000, PlayedPercentage: 16.7, Played: false } };
   await page.route("**/api/auth/media/session", (route) => route.fulfill({

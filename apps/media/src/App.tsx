@@ -15,6 +15,7 @@ type LibraryView = "home" | "favorites" | "list";
 
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [sessionError, setSessionError] = useState("");
   const [home, setHome] = useState<Home | null>(null);
   const [selected, setSelected] = useState<MediaItem | null>(null);
   const [playing, setPlaying] = useState<PlaybackSelection | null>(null);
@@ -34,7 +35,7 @@ export default function App() {
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { void getSession().then(setSession); }, []);
+  useEffect(() => { void recoverSession(); }, []);
   useEffect(() => {
     if (!session) return;
     void refreshHome(session);
@@ -83,6 +84,15 @@ export default function App() {
   const hero = useMemo(() => home?.resume[0] ?? home?.latest[0] ?? home?.movies[0], [home]);
   const promotedList = lists.find((list) => list.id === promotedListId) ?? null;
   const activeList = lists.find((list) => list.id === activeListId) ?? null;
+
+  async function recoverSession() {
+    setSession(undefined);
+    setSessionError("");
+    try { setSession(await getSession()); }
+    catch (reason) {
+      setSessionError(reason instanceof Error ? reason.message : "Could not reach Jellyfin.");
+    }
+  }
 
   async function signIn(username: string, password: string) {
     setBusy(true); setLoginError("");
@@ -150,6 +160,7 @@ export default function App() {
     setMenuOpen(false);
   }
 
+  if (sessionError) return <AppShell kind="media" brand="Cloud Media"><section className="media-page media-error-state"><EmptyState title="Cloud Media is temporarily unavailable" body={sessionError} icon={<Film />} /><Button variant="secondary" onClick={() => void recoverSession()}>Retry</Button></section></AppShell>;
   if (session === undefined) return <div className="boot-screen" aria-label="Loading Cloud Media" />;
   if (!session) return <AppShell kind="media" brand="Cloud Media"><CloudMediaLogin onSubmit={signIn} loading={busy} error={loginError} /></AppShell>;
 

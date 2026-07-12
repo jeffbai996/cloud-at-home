@@ -64,6 +64,13 @@ export type PlaybackInfo = {
 
 let csrf = "";
 
+export class MediaRequestError extends Error {
+  constructor(message: string, readonly status?: number) {
+    super(message);
+    this.name = "MediaRequestError";
+  }
+}
+
 export function httpErrorMessage(status: number, statusText = "", detail = ""): string {
   const descriptions: Record<number, string> = {
     400: "Bad request — the service could not understand the request.",
@@ -103,7 +110,7 @@ async function authenticatedFetch(url: string, options: RequestInit = {}): Promi
 async function responseError(response: Response): Promise<Error> {
   const payload = await response.json().catch(() => null) as { error?: unknown } | null;
   const detail = typeof payload?.error === "string" ? payload.error : "";
-  return new Error(httpErrorMessage(response.status, response.statusText, detail));
+  return new MediaRequestError(httpErrorMessage(response.status, response.statusText, detail), response.status);
 }
 
 async function json<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -115,13 +122,12 @@ async function json<T>(url: string, options: RequestInit = {}): Promise<T> {
 }
 
 export async function getSession(): Promise<Session | null> {
-  try {
-    const session = await json<Session>("/api/auth/media/session");
-    csrf = session.csrf;
-    return session;
-  } catch {
-    return null;
-  }
+  const response = await authenticatedFetch("/api/auth/media/session", { signal: AbortSignal.timeout(5_000) });
+  if (response.status === 401) return null;
+  if (!response.ok) throw await responseError(response);
+  const session = await response.json() as Session;
+  csrf = session.csrf;
+  return session;
 }
 
 export async function login(username: string, password: string): Promise<Session> {
