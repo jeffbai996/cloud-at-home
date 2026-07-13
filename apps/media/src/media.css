@@ -235,6 +235,7 @@
 .details-facts .rating-badge-orange { --rating-edge: #ffc994; --rating-fill: #e57220; background: #e57220; color: #fff; }
 .details-facts .rating-badge-triangle.rating-badge-orange { background: transparent; }
 .details-facts .rating-badge-blue { --rating-edge: rgba(255,255,255,.78); --rating-fill: #278cf5; background: #278cf5; }
+.details-facts .rating-badge-ca.rating-badge-rounded.rating-badge-blue { --rating-fill: #176fc4; background: #176fc4; }
 .details-facts .rating-badge-hex.rating-badge-blue { background: transparent; }
 .details-facts .rating-badge-red { --rating-edge: #ffc0c7; background: #dc2940; color: #fff; border-width: 1.25px; }
 .details-facts .rating-badge-us-tv { min-width: 37px; border-radius: 5px; background: #24262a; letter-spacing: -.07em; }
