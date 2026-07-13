@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const apps = [
   { name: "Cloud", url: "http://127.0.0.1:8082" },
-  { name: "Cloud Media", url: "http://127.0.0.1:8090" },
+  { name: "Video", url: "http://127.0.0.1:8090" },
 ];
 
 for (const app of apps) {
@@ -13,7 +13,7 @@ for (const app of apps) {
       await expect(page.getByLabel("Username")).toBeVisible();
       await expect(page.getByLabel("Password")).toBeVisible();
     } else {
-      await expect(page.getByRole("searchbox", { name: "Search Cloud Media" })).toBeVisible();
+      await expect(page.getByRole("searchbox", { name: "Search Video" })).toBeVisible();
       await expect(page.getByLabel("Username")).toHaveCount(0);
       await expect(page.getByLabel("Password")).toHaveCount(0);
     }
@@ -41,23 +41,23 @@ for (const app of apps) {
     });
     expect(switcherCenter).toBeGreaterThan((await page.viewportSize())!.width / 2);
     await expect(page.locator(".dropdown-label")).toHaveText("SERVICES");
-    await expect(page.getByRole("menuitem", { name: "Cloud Media" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Video" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Cloud" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Local AI" })).toBeVisible();
     const extraService = page.locator(".app-switcher-item").filter({ has: page.locator(".app-glyph-extra") });
     await expect(extraService).toBeVisible();
     await expect(extraService).toHaveText(/^[a-z]+-[a-z]+$/);
-    await expect(page.getByRole("menuitem", { name: "Cloud Media" })).toHaveAttribute("href", "http://127.0.0.1:8090");
+    await expect(page.getByRole("menuitem", { name: "Video" })).toHaveAttribute("href", "http://127.0.0.1:8090");
     await expect(page.getByRole("menuitem", { name: "Cloud" })).toHaveAttribute("href", "http://127.0.0.1:8082");
     await expect(extraService).toHaveAttribute("href", "/api/navigation/extra-service/open");
-    if (app.name === "Cloud Media") {
+    if (app.name === "Video") {
       await expect(page.locator(".app-glyph-media")).toHaveCSS("background-color", "rgb(255, 138, 31)");
       await expect(page.locator(".dropdown-check")).toHaveCSS("color", "rgb(255, 138, 31)");
     }
   });
 }
 
-test("Cloud Media keeps search visible without hover", async ({ page }) => {
+test("Video keeps search visible without hover", async ({ page }) => {
   await page.route("**/api/auth/media/session", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -69,13 +69,13 @@ test("Cloud Media keeps search visible without hover", async ({ page }) => {
     body: route.request().url().includes("Latest") ? "[]" : JSON.stringify({ Items: [] }),
   }));
   await page.goto("http://127.0.0.1:8090");
-  const search = page.getByRole("searchbox", { name: "Search Cloud Media" });
+  const search = page.getByRole("searchbox", { name: "Search Video" });
   await expect(search).toBeVisible();
   const width = await search.evaluate((element) => element.getBoundingClientRect().width);
   expect(width).toBeGreaterThan(150);
 });
 
-test("Cloud Media refresh uses a neutral boot frame without the legacy F badge", async ({ page }) => {
+test("Video refresh uses a neutral boot frame without the legacy F badge", async ({ page }) => {
   await page.route("**/api/auth/media/session", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ authenticated: true, user: { id: "user-1", name: "alice" }, csrf: "example" }) });
@@ -83,12 +83,12 @@ test("Cloud Media refresh uses a neutral boot frame without the legacy F badge",
   await page.route("**/api/media/proxy/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: route.request().url().includes("Latest") ? "[]" : JSON.stringify({ Items: [] }) }));
 
   await page.goto("http://127.0.0.1:8090");
-  await expect(page.getByLabel("Loading Cloud Media")).toBeVisible();
+  await expect(page.getByLabel("Loading Video")).toBeVisible();
   await expect(page.locator(".boot-logo")).toHaveCount(0);
-  await expect(page.getByRole("searchbox", { name: "Search Cloud Media" })).toBeVisible();
+  await expect(page.getByRole("searchbox", { name: "Search Video" })).toBeVisible();
 });
 
-test("Cloud Media treats a session service failure as an outage, not a logout", async ({ page }) => {
+test("Video treats a session service failure as an outage, not a logout", async ({ page }) => {
   await page.route("**/api/auth/media/session", (route) => route.fulfill({
     status: 502,
     contentType: "application/json",
@@ -96,13 +96,13 @@ test("Cloud Media treats a session service failure as an outage, not a logout", 
   }));
 
   await page.goto("http://127.0.0.1:8090");
-  await expect(page.getByRole("heading", { name: "Cloud Media is temporarily unavailable" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Video is temporarily unavailable" })).toBeVisible();
   await expect(page.getByText("502: Jellyfin is unavailable")).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Sign in to Cloud Media" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Sign in to Video" })).toHaveCount(0);
 });
 
-test("Cloud Media header is scaled, orange, and exposes app navigation", async ({ page }) => {
+test("Video header is scaled, orange, and exposes app navigation", async ({ page }) => {
   const item = { Id: "item-1", Name: "Example movie", Type: "Movie", Overview: "A sharp modern description.", RunTimeTicks: 36_000_000_000, UserData: { PlaybackPositionTicks: 6_000_000_000, PlayedPercentage: 16.7, Played: false } };
   await page.route("**/api/auth/media/session", (route) => route.fulfill({
     status: 200,
@@ -121,7 +121,7 @@ test("Cloud Media header is scaled, orange, and exposes app navigation", async (
   expect(await page.locator(".brand").evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(23);
   await expect(page.locator(".brand-mark-media")).toHaveCSS("background-color", "rgb(255, 138, 31)");
   await expect(page.locator(".brand-mark-media svg")).toHaveClass(/lucide-clapperboard/);
-  await expect(page.getByRole("searchbox", { name: "Search Cloud Media" })).toHaveAttribute("placeholder", "search...");
+  await expect(page.getByRole("searchbox", { name: "Search Video" })).toHaveAttribute("placeholder", "search...");
   await expect(page.locator(".hero .eyebrow")).toHaveText("NOW WATCHING");
   await expect(page.locator(".hero .eyebrow")).toHaveCSS("text-transform", "uppercase");
   await expect(page.locator(".hero p")).toHaveCSS("font-family", /Plus Jakarta Sans/);
@@ -132,7 +132,7 @@ test("Cloud Media header is scaled, orange, and exposes app navigation", async (
   await expect(page.getByRole("button", { name: "More info" })).toHaveCSS("border-radius", "999px");
   await expect(page.getByRole("button", { name: /My List/ })).toBeVisible();
 
-  await page.getByRole("button", { name: "Open Cloud Media menu" }).click();
+  await page.getByRole("button", { name: "Open Video menu" }).click();
   for (const name of ["Home", "Continue watching", "Recently added", "Movies", "Shows"]) {
     await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   }
@@ -140,7 +140,7 @@ test("Cloud Media header is scaled, orange, and exposes app navigation", async (
     await expect(page.getByRole(name === "Open Jellyfin" ? "link" : "button", { name, exact: true })).toBeVisible();
   }
   await expect(page.locator(".cloud-media-menu-popover kbd")).toHaveCount(0);
-  const menuButtonCenter = await page.getByRole("button", { name: "Close Cloud Media menu" }).evaluate((element) => {
+  const menuButtonCenter = await page.getByRole("button", { name: "Close Video menu" }).evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     return bounds.left + bounds.width / 2;
   });
@@ -151,12 +151,12 @@ test("Cloud Media header is scaled, orange, and exposes app navigation", async (
   await expect(page.locator(".topbar")).toHaveCSS("height", "0px");
   await page.mouse.move(4, 4);
   await expect.poll(() => page.locator(".topbar").evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(68);
-  await page.getByRole("button", { name: "Open Cloud Media menu" }).click();
+  await page.getByRole("button", { name: "Open Video menu" }).click();
   await page.getByRole("button", { name: "Search library" }).click();
-  await expect(page.getByRole("searchbox", { name: "Search Cloud Media" })).toBeFocused();
+  await expect(page.getByRole("searchbox", { name: "Search Video" })).toBeFocused();
 });
 
-test("Cloud Media series modal loads episodes and plays the next episode", async ({ page }) => {
+test("Video series modal loads episodes and plays the next episode", async ({ page }) => {
   const series = {
     Id: "series-1",
     Name: "Billions",
@@ -236,7 +236,7 @@ test("Cloud Media series modal loads episodes and plays the next episode", async
   await expect(page.locator(".player-top > div > span").last()).toHaveText("Naming Rights");
 });
 
-test("Cloud Media surfaces an authenticated Jellyfin failure", async ({ page }) => {
+test("Video surfaces an authenticated Jellyfin failure", async ({ page }) => {
   await page.route("**/api/auth/media/session", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -248,12 +248,12 @@ test("Cloud Media surfaces an authenticated Jellyfin failure", async ({ page }) 
     body: JSON.stringify({ error: "Jellyfin is unavailable" }),
   }));
   await page.goto("http://127.0.0.1:8090");
-  await expect(page.getByRole("heading", { name: "Couldn’t load Cloud Media" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Couldn’t load Video" })).toBeVisible();
   await expect(page.getByText("Jellyfin is unavailable")).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
 });
 
-test("Cloud Media player shows a streaming-style time preview", async ({ page }) => {
+test("Video player shows a streaming-style time preview", async ({ page }) => {
   const item = { Id: "item-1", Name: "Example movie", Type: "Movie", ProductionYear: 2024, RunTimeTicks: 36_000_000_000 };
   let stoppedPosition = 0;
   const playbackEvents: string[] = [];
@@ -297,7 +297,7 @@ test("Cloud Media player shows a streaming-style time preview", async ({ page })
   });
   await page.goto("http://127.0.0.1:8090");
   const favoritesAction = page.getByRole("button", { name: /^Favorites/ });
-  const searchAction = page.getByRole("searchbox", { name: "Search Cloud Media" });
+  const searchAction = page.getByRole("searchbox", { name: "Search Video" });
   const homeAction = page.getByRole("button", { name: "Home" });
   const cinemaAction = page.getByRole("button", { name: "Cinema mode" });
   const servicesAction = page.getByRole("button", { name: "Switch app" });
@@ -543,7 +543,7 @@ test("Cloud opens code and PDF files in polished viewers", async ({ page }) => {
   await expect(page.locator(".viewer-actions").getByRole("link", { name: "Open" })).toHaveAttribute("target", "_blank");
 });
 
-test("Cloud stays gated while Cloud Media auto-authenticates", async ({ request }) => {
+test("Cloud stays gated while Video auto-authenticates", async ({ request }) => {
   expect((await request.get("http://127.0.0.1:8082/api/auth/files/session")).status()).toBe(401);
   expect((await request.get("http://127.0.0.1:8090/api/auth/media/session")).status()).toBe(200);
 });

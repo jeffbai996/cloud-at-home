@@ -99,7 +99,7 @@ export function formatPlaybackStats(input: PlaybackStatsInput): Array<[string, s
 }
 
 export const webPlaybackProfile = {
-  Name: "Cloud Media Web",
+  Name: "Video Web",
   MaxStreamingBitrate: 120_000_000,
   DirectPlayProfiles: [
     { Container: "mp4,m4v", Type: "Video", VideoCodec: "h264", AudioCodec: "aac,mp3,ac3" },

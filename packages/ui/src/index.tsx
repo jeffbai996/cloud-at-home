@@ -23,7 +23,7 @@ export type AppKind = "media" | "files" | "ai";
 type ServiceKind = AppKind | "extra";
 
 const apps = [
-  { id: "media" as const, label: "Cloud Media", icon: Play, localPort: 8090, tailnetPort: 8453 },
+  { id: "media" as const, label: "Video", icon: Play, localPort: 8090, tailnetPort: 8453 },
   { id: "files" as const, label: "Drive", icon: Files, localPort: 8082, tailnetPort: 8454 },
   { id: "ai" as const, label: "Local AI", icon: Bot, localPort: 3003, tailnetPort: 8445 },
 ];

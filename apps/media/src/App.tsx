@@ -213,14 +213,14 @@ export default function App() {
     setMenuOpen(false);
   }
 
-  if (sessionError) return <AppShell kind="media" brand="Cloud Media"><section className="media-page media-error-state"><EmptyState title="Cloud Media is temporarily unavailable" body={sessionError} icon={<Film />} /><Button variant="secondary" onClick={() => void recoverSession()}>Retry</Button></section></AppShell>;
-  if (session === undefined) return <div className="boot-screen" aria-label="Loading Cloud Media" />;
-  if (!session) return <AppShell kind="media" brand="Cloud Media"><CloudMediaLogin onSubmit={signIn} loading={busy} error={loginError} /></AppShell>;
+  if (sessionError) return <AppShell kind="media" brand="Video"><section className="media-page media-error-state"><EmptyState title="Video is temporarily unavailable" body={sessionError} icon={<Film />} /><Button variant="secondary" onClick={() => void recoverSession()}>Retry</Button></section></AppShell>;
+  if (session === undefined) return <div className="boot-screen" aria-label="Loading Video" />;
+  if (!session) return <AppShell kind="media" brand="Video"><CloudMediaLogin onSubmit={signIn} loading={busy} error={loginError} /></AppShell>;
 
   return (
     <AppShell
       kind="media"
-      brand="Cloud Media"
+      brand="Video"
       headerCollapsed={headerCollapsed}
       headerAutoHidden={mobileHeaderHidden}
       navigation={
@@ -247,12 +247,12 @@ export default function App() {
       actions={
         <><button className={`media-nav-list media-favorites-nav ${libraryView === "favorites" ? "active" : ""}`} aria-label={`Favorites ${favorites.length}`} onClick={showFavorites}><Heart size={16} fill={libraryView === "favorites" ? "currentColor" : "none"} /><span>Favorites</span>{favorites.length > 0 && <b>{favorites.length}</b>}</button>{promotedList && <button className={`media-nav-list promoted ${libraryView === "list" && activeListId === promotedList.id ? "active" : ""}`} aria-label={`${promotedList.name} ${promotedList.items.length}`} onClick={() => showList(promotedList.id)}><ListPlus size={16} /><span title={promotedList.name}>{promotedList.name}</span>{promotedList.items.length > 0 && <b>{promotedList.items.length}</b>}</button>}<div ref={searchShellRef} className={`media-search-shell ${mobileSearchOpen ? "mobile-search-open" : ""}`} onFocus={() => setSearchFocused(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchFocused(false); }}><button className="icon-button media-search-trigger" aria-label="Search" aria-expanded={mobileSearchOpen} onClick={() => { const opening = !mobileSearchOpen; setMobileSearchOpen(opening); if (opening) requestAnimationFrame(() => searchRef.current?.focus()); }}><SearchGlyph size={17} /></button><div className={`media-search ${query ? "media-search-active" : ""}`}>
           <SearchGlyph size={17} />
-          <input ref={searchRef} type="search" value={query} onFocus={() => setLibraryView("home")} onKeyDown={(event) => { if (event.key === "Escape") { setQuery(""); setMobileSearchOpen(false); searchRef.current?.blur(); } }} onChange={(event) => setQuery(event.target.value)} placeholder="search..." aria-label="Search Cloud Media" autoComplete="off" />
+          <input ref={searchRef} type="search" value={query} onFocus={() => setLibraryView("home")} onKeyDown={(event) => { if (event.key === "Escape") { setQuery(""); setMobileSearchOpen(false); searchRef.current?.blur(); } }} onChange={(event) => setQuery(event.target.value)} placeholder="search..." aria-label="Search Video" autoComplete="off" />
           {query && <button aria-label="Clear search" onClick={() => setQuery("")}><X size={15} /></button>}
         </div>{searchFocused && query.trim() && results.length > 0 && <div className="media-search-suggestions" role="listbox" aria-label="Search suggestions">{results.slice(0, 6).map((item) => <button key={item.Id} role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSelected(item); setQuery(""); setSearchFocused(false); setMobileSearchOpen(false); searchRef.current?.blur(); }}><img src={imageUrl(item, "Primary", 100)} alt="" /><span><strong>{item.SeriesName ?? item.Name}</strong><small>{item.SeriesName ? item.Name : [item.ProductionYear, item.Type === "Series" ? "TV" : item.Type].filter(Boolean).join(" · ")}</small></span></button>)}</div>}</div><button className="icon-button media-home-action" aria-label="Home" title="Home" onClick={() => navigateTo()}><House size={17} /></button><button className="icon-button media-cinema-action" aria-label="Cinema mode" title="Cinema mode" onClick={() => { setMenuOpen(false); setMobileSearchOpen(false); setHeaderCollapsed(true); }}><Clapperboard size={17} /></button></>
       }
     >
-      {headerCollapsed && !playing && <div className="cloud-media-header-reveal-zone" onMouseEnter={() => setHeaderCollapsed(false)}><button className="cloud-media-header-restore" aria-label="Restore Cloud Media header" onClick={() => setHeaderCollapsed(false)}><ChevronDown size={17} /><span>Show header</span></button></div>}
+      {headerCollapsed && !playing && <div className="cloud-media-header-reveal-zone" onMouseEnter={() => setHeaderCollapsed(false)}><button className="cloud-media-header-restore" aria-label="Restore Video header" onClick={() => setHeaderCollapsed(false)}><ChevronDown size={17} /><span>Show header</span></button></div>}
       {query ? (
         <section className="media-page search-page"><div className="section-heading"><div><span className="eyebrow">Search</span><h1>{results.length ? `Results for “${query}”` : "No matches yet"}</h1></div></div><MediaGrid items={results} onSelect={setSelected} /></section>
       ) : libraryView === "favorites" ? (
@@ -261,7 +261,7 @@ export default function App() {
         <section className="media-page list-page"><div className="section-heading"><div><span className="eyebrow">List</span><h1>{activeList.name}</h1></div></div><MediaGrid items={activeList.items} onSelect={setSelected} /></section>
       ) : !home ? (
         homeError
-          ? <section className="media-page media-error-state"><EmptyState title="Couldn’t load Cloud Media" body={homeError} icon={<Film />} /><Button variant="secondary" onClick={() => void refreshHome(session)}>Retry</Button></section>
+          ? <section className="media-page media-error-state"><EmptyState title="Couldn’t load Video" body={homeError} icon={<Film />} /><Button variant="secondary" onClick={() => void refreshHome(session)}>Retry</Button></section>
           : <div className="media-loading"><Skeleton className="hero-skeleton" /><div className="skeleton-row">{Array.from({ length: 6 }, (_, index) => <Skeleton key={index} className="poster-skeleton" />)}</div></div>
       ) : (
         <>
@@ -331,11 +331,11 @@ function CloudMediaMenu({
   ];
   return (
     <div className="cloud-media-menu">
-      <button className="cloud-media-menu-trigger" aria-label={open ? "Close Cloud Media menu" : "Open Cloud Media menu"} aria-expanded={open} onClick={onToggle}><Menu size={20} /></button>
+      <button className="cloud-media-menu-trigger" aria-label={open ? "Close Video menu" : "Open Video menu"} aria-expanded={open} onClick={onToggle}><Menu size={20} /></button>
       <AnimatePresence>
         {open && (
           <motion.div className="cloud-media-menu-popover" initial={{ opacity: 0, y: -8, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -5, scale: .98 }}>
-            <span>Browse Cloud Media</span>
+            <span>Browse Video</span>
             <button onClick={onSearch}><Search size={16} />Search library</button>
             <button className="cloud-media-menu-favorites" onClick={onFavorites}><Heart size={16} />Favorites</button>
             {items.map((entry) => <button key={entry.name} onClick={() => onNavigate(entry.section)}>{entry.icon}{entry.name}</button>)}
@@ -367,7 +367,7 @@ function CloudMediaLogin({ onSubmit, loading, error }: { onSubmit: (username: st
       <div className="cloud-media-login-glow" />
       <form onSubmit={(event) => { event.preventDefault(); onSubmit(username.trim(), password); }}>
         <span className="cloud-media-login-kicker">WELCOME BACK</span>
-        <h1>Sign in to Cloud Media</h1>
+        <h1>Sign in to Video</h1>
         <p>Pick up where you left off, on your own profile.</p>
         <label><span>Profile</span><input autoFocus required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Profile name" /></label>
         <label><span>Password <small>optional</small></span><input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" /></label>

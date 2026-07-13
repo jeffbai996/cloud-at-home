@@ -95,7 +95,7 @@ async function authenticatedFetch(url: string, options: RequestInit = {}): Promi
   if (csrf && options.method && options.method !== "GET") headers.set("X-CSRF-Token", csrf);
   let response: Response;
   try { response = await fetch(url, { ...options, headers, credentials: "include" }); }
-  catch { throw new Error("Network error: Could not reach Cloud Media."); }
+  catch { throw new Error("Network error: Could not reach Video."); }
   if (response.status === 401 && url.startsWith("/api/media/") && url !== "/api/auth/media/session") {
     const refreshed = await fetch("/api/auth/media/session", { credentials: "include" });
     if (refreshed.ok) {
