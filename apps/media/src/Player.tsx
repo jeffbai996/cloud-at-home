@@ -564,7 +564,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       return;
     }
     if (viewportFullscreen) { setViewportFullscreen(false); return; }
-    if (usesNativeVideoFullscreen(navigator.userAgent)) {
+    if (usesNativeVideoFullscreen(navigator.userAgent, navigator.maxTouchPoints)) {
       const video = videoRef.current;
       if (typeof video?.webkitEnterFullscreen === "function") {
         try {
@@ -762,15 +762,18 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
 }
 
 function PlayPauseGlyph({ playing }: { playing: boolean }) {
+  // A single glyph that crossfades in place. The old AnimatePresence kept both
+  // icons mounted and counter-rotated them, which read as a double-image spin
+  // on the large center button. Straight opacity + a whisper of scale is calm.
   return (
-    <AnimatePresence initial={false}>
+    <AnimatePresence initial={false} mode="wait">
       <motion.span
         className="playback-glyph"
         key={playing ? "pause" : "play"}
-        initial={{ opacity: 0, scale: .72, rotate: playing ? -8 : 8 }}
-        animate={{ opacity: 1, scale: 1, rotate: 0 }}
-        exit={{ opacity: 0, scale: .78, rotate: playing ? 8 : -8 }}
-        transition={{ duration: .14, ease: [0.22, 1, 0.36, 1] }}
+        initial={{ opacity: 0, scale: .9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: .9 }}
+        transition={{ duration: .1, ease: "easeOut" }}
       >
         {playing ? <Pause /> : <Play />}
       </motion.span>
