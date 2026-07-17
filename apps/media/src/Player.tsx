@@ -564,7 +564,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       return;
     }
     if (viewportFullscreen) { setViewportFullscreen(false); return; }
-    if (usesNativeVideoFullscreen(navigator.userAgent, navigator.maxTouchPoints)) {
+    if (usesNativeVideoFullscreen(navigator.userAgent)) {
       const video = videoRef.current;
       if (typeof video?.webkitEnterFullscreen === "function") {
         try {

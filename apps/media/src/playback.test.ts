@@ -53,7 +53,7 @@ describe("player preferences", () => {
     expect(captionLineHeight(2.2)).toBe(2);
   });
 
-  it("uses native video fullscreen only on iPhone and iPod", () => {
+  it("keeps iPad out of native video fullscreen", () => {
     expect(usesNativeVideoFullscreen("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X)")).toBe(true);
     expect(usesNativeVideoFullscreen("Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X)")).toBe(false);
     expect(usesNativeVideoFullscreen("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")).toBe(false);
