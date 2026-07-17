@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Clapperboard, Clock3, ExternalLink, Film, Flag, Heart, House, ListPlus, LogOut, Menu, Pin, Play, Plus, RefreshCw, RotateCcw, Search, Shuffle, Trash2, Tv, X } from "lucide-react";
+import { Check, ChevronDown, Clapperboard, Clock3, ExternalLink, Film, Flag, Heart, House, Info, ListPlus, LogOut, Menu, Pin, Play, Plus, RefreshCw, RotateCcw, Search, Shuffle, Trash2, Tv, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
@@ -119,7 +119,6 @@ export default function App() {
 
   const hero = useMemo(() => home?.resume[0] ?? home?.latest[0] ?? home?.movies[0], [home]);
   const movieShelves = useMemo(() => buildMovieShelves(home?.movies ?? []), [home?.movies]);
-  const promotedList = lists.find((list) => list.id === promotedListId) ?? null;
   const activeList = lists.find((list) => list.id === activeListId) ?? null;
 
   async function recoverSession() {
@@ -245,11 +244,11 @@ export default function App() {
         /><button className="icon-button topbar-signout" aria-label="Sign out" title="Sign out" onClick={() => void signOut()}><LogOut size={17} /></button></>
       }
       actions={
-        <><button className={`media-nav-list media-favorites-nav ${libraryView === "favorites" ? "active" : ""}`} aria-label={`Favorites ${favorites.length}`} onClick={showFavorites}><Heart size={16} fill={libraryView === "favorites" ? "currentColor" : "none"} /><span>Favorites</span>{favorites.length > 0 && <b>{favorites.length}</b>}</button>{promotedList && <button className={`media-nav-list promoted ${libraryView === "list" && activeListId === promotedList.id ? "active" : ""}`} aria-label={`${promotedList.name} ${promotedList.items.length}`} onClick={() => showList(promotedList.id)}><ListPlus size={16} /><span title={promotedList.name}>{promotedList.name}</span>{promotedList.items.length > 0 && <b>{promotedList.items.length}</b>}</button>}<div ref={searchShellRef} className={`media-search-shell ${mobileSearchOpen ? "mobile-search-open" : ""}`} onFocus={() => setSearchFocused(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchFocused(false); }}><button className="icon-button media-search-trigger" aria-label="Search" aria-expanded={mobileSearchOpen} onClick={() => { const opening = !mobileSearchOpen; setMobileSearchOpen(opening); if (opening) requestAnimationFrame(() => searchRef.current?.focus()); }}><SearchGlyph size={17} /></button><div className={`media-search ${query ? "media-search-active" : ""}`}>
+        <><button className={`media-nav-list media-favorites-nav ${libraryView === "favorites" ? "active" : ""}`} aria-label={`Favorites ${favorites.length}`} onClick={showFavorites}><Heart size={16} fill={libraryView === "favorites" ? "currentColor" : "none"} /><span>Favorites</span>{favorites.length > 0 && <b>{favorites.length}</b>}</button><div ref={searchShellRef} className={`media-search-shell ${mobileSearchOpen ? "mobile-search-open" : ""}`} onFocus={() => setSearchFocused(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchFocused(false); }}><button className="icon-button media-search-trigger" aria-label="Search" aria-expanded={mobileSearchOpen} onClick={() => { const opening = !mobileSearchOpen; setMobileSearchOpen(opening); if (opening) requestAnimationFrame(() => searchRef.current?.focus()); }}><SearchGlyph size={17} /></button><div className={`media-search ${query ? "media-search-active" : ""}`}>
           <SearchGlyph size={17} />
           <input ref={searchRef} type="search" value={query} onFocus={() => setLibraryView("home")} onKeyDown={(event) => { if (event.key === "Escape") { setQuery(""); setMobileSearchOpen(false); searchRef.current?.blur(); } }} onChange={(event) => setQuery(event.target.value)} placeholder="search..." aria-label="Search Video" autoComplete="off" />
           {query && <button aria-label="Clear search" onClick={() => setQuery("")}><X size={15} /></button>}
-        </div>{searchFocused && query.trim() && results.length > 0 && <div className="media-search-suggestions" role="listbox" aria-label="Search suggestions">{results.slice(0, 6).map((item) => <button key={item.Id} role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSelected(item); setQuery(""); setSearchFocused(false); setMobileSearchOpen(false); searchRef.current?.blur(); }}><img src={imageUrl(item, "Primary", 100)} alt="" /><span><strong>{item.SeriesName ?? item.Name}</strong><small>{item.SeriesName ? item.Name : [item.ProductionYear, item.Type === "Series" ? "TV" : item.Type].filter(Boolean).join(" · ")}</small></span></button>)}</div>}</div><button className="icon-button media-home-action" aria-label="Home" title="Home" onClick={() => navigateTo()}><House size={17} /></button><button className="icon-button media-cinema-action" aria-label="Cinema mode" title="Cinema mode" onClick={() => { setMenuOpen(false); setMobileSearchOpen(false); setHeaderCollapsed(true); }}><Clapperboard size={17} /></button></>
+        </div>{searchFocused && query.trim() && results.length > 0 && <div className="media-search-suggestions" role="listbox" aria-label="Search suggestions">{results.slice(0, 6).map((item) => <button key={item.Id} role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSelected(item); setQuery(""); setSearchFocused(false); setMobileSearchOpen(false); searchRef.current?.blur(); }}><img src={imageUrl(item, "Primary", 100)} alt="" /><span><strong>{item.SeriesName ?? item.Name}</strong><small>{item.SeriesName ? item.Name : [item.ProductionYear, item.Type === "Series" ? "TV" : item.Type].filter(Boolean).join(" · ")}</small></span></button>)}</div>}</div><button className="icon-button media-home-action" aria-label="Home" title="Home" onClick={() => navigateTo()}><House size={17} /></button><WatchlistDropdown lists={lists} activeListId={libraryView === "list" ? activeListId : null} onOpenList={showList} onManageLists={() => setListsOpen(true)} /><button className="icon-button media-cinema-action" aria-label="Cinema mode" title="Cinema mode" onClick={() => { setMenuOpen(false); setMobileSearchOpen(false); setHeaderCollapsed(true); }}><Clapperboard size={17} /></button></>
       }
     >
       {headerCollapsed && !playing && <div className="cloud-media-header-reveal-zone" onMouseEnter={() => setHeaderCollapsed(false)}><button className="cloud-media-header-restore" aria-label="Restore Video header" onClick={() => setHeaderCollapsed(false)}><ChevronDown size={17} /><span>Show header</span></button></div>}
@@ -279,6 +278,65 @@ export default function App() {
       <AnimatePresence>{playing && <Player key={playing.item.Id} item={playing.item} fromBeginning={playing.fromBeginning} session={session} onPlayEpisode={(episode) => play(episode)} onClose={() => { setPlaying(null); setHeaderCollapsed(false); void refreshHome(session); }} />}</AnimatePresence>
       <ListManager open={listsOpen} lists={lists} promotedListId={promotedListId} onClose={() => setListsOpen(false)} onChange={setLists} onPromote={setPromotedListId} onOpen={showList} />
     </AppShell>
+  );
+}
+
+function WatchlistDropdown({
+  lists,
+  activeListId,
+  onOpenList,
+  onManageLists,
+}: {
+  lists: MediaList[];
+  activeListId: string | null;
+  onOpenList: (id: string) => void;
+  onManageLists: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!shellRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const activeInList = lists.some((list) => list.id === activeListId);
+  return (
+    <div className="cloud-media-menu watchlist-dropdown" ref={shellRef}>
+      <button
+        className={`icon-button watchlist-trigger ${activeInList ? "active" : ""}`}
+        aria-label="Watchlists"
+        title="Watchlists"
+        aria-expanded={open}
+        data-state={open ? "open" : undefined}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <ListPlus size={17} /><ChevronDown className="watchlist-caret" size={13} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div className="cloud-media-menu-popover watchlist-popover" initial={{ opacity: 0, y: -8, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -5, scale: .98 }} transition={{ duration: .16, ease: [0.22, 1, 0.36, 1] }}>
+            <span>Watchlists</span>
+            {lists.length === 0
+              ? <p className="watchlist-empty">No lists yet. Create one to keep track of what you want to watch.</p>
+              : lists.map((list) => (
+                <button key={list.id} className={list.id === activeListId ? "active" : ""} onClick={() => { onOpenList(list.id); setOpen(false); }}>
+                  <ListPlus size={16} /><span className="menu-list-name" title={list.name}>{list.name}</span>{list.items.length > 0 && <small>{list.items.length}</small>}
+                </button>
+              ))}
+            <div className="cloud-media-menu-rule" />
+            <button className="watchlist-manage" onClick={() => { onManageLists(); setOpen(false); }}><Plus size={16} />{lists.length ? "Manage lists" : "Create a list"}</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -390,7 +448,7 @@ function Hero({ item, onPlay, onInfo }: { item: MediaItem; onPlay: (fromBeginnin
         <h1>{item.Name}</h1>
         <div className="hero-meta">{item.ProductionYear && <span>{item.ProductionYear}</span>}{minutes > 0 && <span>{minutes} min</span>}</div>
         {item.Overview && <p>{item.Overview}</p>}
-        <div className="hero-actions"><Button onClick={() => onPlay(false)}><Play size={18} fill="currentColor" /> {resumable ? "Resume" : "Play"}</Button>{resumable && <Button variant="secondary" onClick={() => onPlay(true)}><RotateCcw size={17} /> Play from beginning</Button>}<Button className="hero-more-info" variant="secondary" onClick={onInfo}>More info</Button></div>
+        <div className="hero-actions"><Button onClick={() => onPlay(false)}><Play size={18} fill="currentColor" /> {resumable ? "Resume" : "Play"}</Button>{resumable && <Button variant="secondary" onClick={() => onPlay(true)}><RotateCcw size={17} /> Play from beginning</Button>}<Button className="hero-more-info" variant="secondary" aria-label="More info" title="More info" onClick={onInfo}><Info size={20} /></Button></div>
       </motion.div>
     </section>
   );

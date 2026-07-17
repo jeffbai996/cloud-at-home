@@ -28,6 +28,18 @@
 .cloud-media-menu-popover .menu-list-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cloud-media-menu-popover button > small { min-width: 18px; color: var(--muted); font-size: 9px; text-align: right; }
 .cloud-media-menu-popover .cloud-media-menu-mobile-signout { display: none; }
+/* Watchlist dropdown — compact trigger to the right of Home, replacing the
+   old full-width promoted-list pill. Reuses the menu popover visual language. */
+.watchlist-dropdown { position: relative; }
+.watchlist-trigger { width: auto; min-width: 38px; gap: 3px; padding: 0 8px; }
+.watchlist-trigger .watchlist-caret { opacity: .55; transition: transform .18s ease; }
+.watchlist-trigger[data-state="open"] .watchlist-caret { transform: rotate(180deg); }
+.watchlist-trigger.active { border-color: rgba(255,138,31,.24); background: rgba(255,138,31,.10); color: #ffad55; }
+.watchlist-popover { width: 240px; }
+.watchlist-popover button.active { background: rgba(255,138,31,.12); color: #ffc584; }
+.watchlist-popover button.active svg { color: #ff9d3d; }
+.watchlist-popover .watchlist-manage { color: var(--text-2); }
+.watchlist-popover .watchlist-empty { margin: 0; padding: 4px 10px 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
 .cloud-media-login { position: relative; min-height: calc(100vh - var(--topbar)); display: grid; place-items: center; overflow: hidden; padding: 42px 20px 72px; background: radial-gradient(circle at 20% 15%, rgba(255,138,31,.13), transparent 34%), linear-gradient(145deg, #050505, #111 58%, #080808); }
 .cloud-media-login-glow { position: absolute; width: min(780px, 90vw); aspect-ratio: 1; border-radius: 50%; background: rgba(255,138,31,.055); filter: blur(90px); transform: translate(34%, 18%); pointer-events: none; }
 .cloud-media-login form { position: relative; width: min(410px, 100%); display: grid; gap: 18px; padding: clamp(30px, 5vw, 48px); border: 1px solid rgba(255,255,255,.1); border-radius: 22px; background: rgba(12,12,13,.91); box-shadow: 0 34px 90px rgba(0,0,0,.58); backdrop-filter: blur(22px); }
@@ -82,7 +94,8 @@
 .hero-actions .button-primary { border-color: rgba(255,173,85,.42); background: linear-gradient(135deg, #ff9d3d, #ff7815); box-shadow: 0 12px 32px rgba(255,120,21,.20); }
 .hero-actions .button-secondary { border-color: rgba(255,255,255,.14); background: rgba(25,26,30,.72); backdrop-filter: blur(14px) saturate(135%); }
 .hero-actions .button:hover { transform: translateY(-2px) scale(1.015); }
-.hero-actions .hero-more-info { min-height: 39px; padding-inline: 13px; font-size: 11.5px; }
+.hero-actions .hero-more-info { width: 48px; min-width: 48px; min-height: 48px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
+.hero-actions .hero-more-info svg { width: 20px; height: 20px; }
 .media-rails { position: relative; z-index: 3; margin-top: -26px; padding-bottom: 54px; }
 .media-rail { margin: 0 0 27px; }
 .media-rail h2, .section-heading h1 { margin: 0 0 14px; padding: 0 clamp(18px, 4vw, 58px); font: 700 clamp(20px, 2.15vw, 27px) "Plus Jakarta Sans"; letter-spacing: -.03em; }
@@ -291,6 +304,13 @@
 .player-shell.player-controls-hidden,
 .player-shell.player-controls-hidden * { cursor: none !important; }
 .player-video { position: relative; z-index: 0; width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
+/* We render captions ourselves in .subtitle-layer. iPadOS force-paints a
+   "hidden" text track when the system caption accessibility setting is on,
+   which double-renders behind the controls — hide WebKit's native cue box.
+   The native track is restored on purpose only in true video fullscreen,
+   where the element is the browser's fullscreen chrome, not .player-video. */
+.player-video::-webkit-media-text-track-display,
+.player-video::cue { display: none; }
 .pause-cinema { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
 .pause-cinema-art { position: absolute; inset: -24px; background-position: center; background-size: cover; filter: blur(18px) saturate(.82) brightness(.64); }
 .pause-cinema-shade { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(3,4,6,.92) 0%, rgba(3,4,6,.68) 42%, rgba(3,4,6,.23) 76%), linear-gradient(0deg, rgba(0,0,0,.52), transparent 45%); }

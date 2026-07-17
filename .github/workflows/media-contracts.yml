@@ -1,0 +1,33 @@
+name: Media contracts
+
+on:
+  pull_request:
+    paths:
+      - "apps/media/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/media-contracts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/media/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/media-contracts.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify public media contracts
+        run: scripts/check-media-contracts.sh
