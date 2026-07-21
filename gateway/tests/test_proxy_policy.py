@@ -21,7 +21,10 @@ def test_media_proxy_denies_server_administration() -> None:
     policy = ProxyPolicy.media()
     assert policy.validate("GET", "Users/user-1/Items") == "Users/user-1/Items"
     assert policy.validate("POST", "Sessions/Playing/Progress") == "Sessions/Playing/Progress"
+    assert policy.validate("DELETE", "UserPlayedItems/item-1") == "UserPlayedItems/item-1"
     with pytest.raises(ValueError):
         policy.validate("POST", "System/Shutdown")
     with pytest.raises(ValueError):
         policy.validate("DELETE", "Users/user-1")
+    with pytest.raises(ValueError):
+        policy.validate("DELETE", "Items/item-1")

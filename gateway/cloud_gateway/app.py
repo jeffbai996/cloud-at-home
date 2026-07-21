@@ -10,8 +10,9 @@ from typing import Any
 from urllib.parse import quote
 
 from flask import Flask, Response, jsonify, redirect, request
+from requests import RequestException
 
-from .adapters import FileBrowserAdapter, JellyfinAdapter, UpstreamError
+from .adapters import FileBrowserAdapter, JellyfinAdapter, UpstreamError, UpstreamResponse
 from .database import Database
 from .preference_store import PreferenceStore
 from .proxy import ProxyPolicy
@@ -19,6 +20,7 @@ from .paths import normalize_virtual_path, restored_name
 from .sessions import Session, SessionStore, TokenVault
 from .trash import TrashStore
 from .stream_tickets import StreamTicketStore, rewrite_hls_playlist
+from .subtitles import normalize_vtt
 
 
 COOKIE_NAMES = {
@@ -237,6 +239,22 @@ def create_app(
             return jsonify({"error": "upstream request is not allowed"}), 403
         except UpstreamError as exc:
             return jsonify({"error": str(exc)}), exc.status
+        # Upstream token expired (FileBrowser JWT ~2h; the gateway can't refresh
+        # it — it never kept the password). Without this, the raw 401 leaked to
+        # the browser while the gateway cookie stayed valid, so the frontend
+        # kept firing the dead token and every request 401'd until a manual
+        # logout/login. Invalidate the session + clear the cookie so the client
+        # falls back to the login screen cleanly. (Media already does this in
+        # session_status; the files proxy never did — that was the bug.)
+        if upstream_response.status == 401:
+            if not isinstance(upstream_response.body, bytes):
+                for _chunk in upstream_response.body:   # drain the stream
+                    pass
+            sessions.delete(session.id, service)
+            response = jsonify({"error": "session expired"})
+            response.status_code = 401
+            response.delete_cookie(COOKIE_NAMES[service], path="/")
+            return response
         return Response(
             upstream_response.body,
             status=upstream_response.status,
@@ -255,6 +273,34 @@ def create_app(
         if request.method == "GET":
             return jsonify(preferences.get(key))
         return jsonify(preferences.put(key, request.get_json(silent=True) or {}))
+
+    @app.get("/api/media/subtitles/<item_id>/<source_id>/<int:stream_index>.vtt")
+    def media_subtitle(item_id: str, source_id: str, stream_index: int) -> Response:
+        session, error = authenticated("media")
+        if error:
+            return error
+        if not all(re.fullmatch(r"[A-Za-z0-9-]{8,64}", value) for value in (item_id, source_id)):
+            return jsonify({"error": "invalid subtitle source"}), 400
+        try:
+            upstream = services["media"].request(
+                session.token,
+                "GET",
+                f"Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream.vtt",
+            )
+        except UpstreamError as exc:
+            return jsonify({"error": str(exc)}), exc.status
+        raw = upstream.body if isinstance(upstream.body, bytes) else b"".join(upstream.body)
+        if upstream.status != 200:
+            return Response(raw, status=upstream.status, headers=dict(upstream.headers))
+        try:
+            body = normalize_vtt(raw)
+        except ValueError:
+            return jsonify({"error": "invalid subtitle data"}), 502
+        return Response(
+            body,
+            content_type="text/vtt; charset=utf-8",
+            headers={"Cache-Control": "private, max-age=300"},
+        )
 
     @app.post("/api/media/tickets")
     def media_ticket_create() -> Response:
@@ -279,23 +325,46 @@ def create_app(
         ticket = tickets.get(ticket_id, item_id)
         if ticket is None:
             return jsonify({"error": "stream ticket expired or invalid"}), 403
-        try:
+        forwarded_headers = {
+            key: value for key, value in request.headers.items()
+            if key.lower() in {"range", "accept"}
+        }
+
+        def fetch_upstream() -> UpstreamResponse:
             safe_path = policies["media"].validate("GET", upstream)
-            forwarded_headers = {
-                key: value for key, value in request.headers.items()
-                if key.lower() in {"range", "accept"}
-            }
-            upstream_response = services["media"].request(
+            return services["media"].request(
                 ticket.token,
                 "GET",
                 safe_path,
                 query=request.query_string,
                 headers=forwarded_headers,
             )
+
+        try:
+            upstream_response = fetch_upstream()
         except (ValueError, UpstreamError):
             return jsonify({"error": "media stream unavailable"}), 502
         content_type = upstream_response.headers.get("Content-Type", "")
-        if upstream.endswith(".m3u8") or "mpegurl" in content_type.lower():
+        is_playlist = upstream.endswith(".m3u8") or "mpegurl" in content_type.lower()
+        should_buffer = is_playlist or upstream.endswith((".ts", ".m4s"))
+        if should_buffer and not isinstance(upstream_response.body, bytes):
+            try:
+                buffered_body = b"".join(upstream_response.body)
+            except RequestException:
+                # Do not expose a partial HLS object to the browser. Jellyfin can
+                # occasionally close a completed transcode segment a few bytes
+                # early; refetch it once while the playback ticket is still live.
+                try:
+                    upstream_response = fetch_upstream()
+                    buffered_body = (
+                        upstream_response.body
+                        if isinstance(upstream_response.body, bytes)
+                        else b"".join(upstream_response.body)
+                    )
+                except (ValueError, UpstreamError, RequestException):
+                    return jsonify({"error": "media stream unavailable"}), 502
+            upstream_response.body = buffered_body
+        if is_playlist:
             raw = upstream_response.body if isinstance(upstream_response.body, bytes) else b"".join(upstream_response.body)
             rewritten = rewrite_hls_playlist(
                 raw.decode("utf-8", errors="replace"),

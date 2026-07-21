@@ -12,7 +12,7 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
         "fontFamily": "Inter",
         "fontSize": 75,
         "fontWeight": 600,
-        "lineHeight": 1.25,
+        "lineHeight": 1.53,
         "letterSpacing": 0,
         "offset": 8,
         "color": "#ffffff",

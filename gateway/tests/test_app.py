@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from cryptography.fernet import Fernet
+from requests.exceptions import ChunkedEncodingError
 
 from cloud_gateway.adapters import AuthResult, UpstreamResponse
 from cloud_gateway.app import create_app
@@ -167,6 +168,28 @@ def test_json_proxy_buffers_body_and_recalculates_content_length(tmp_path) -> No
     assert not any(key.lower() == "content-length" for key in forwarded["headers"])
 
 
+def test_media_subtitle_route_returns_normalized_same_origin_vtt(tmp_path) -> None:
+    class SubtitleAdapter(FakeAdapter):
+        def request(self, token: str, method: str, path: str, **kwargs) -> UpstreamResponse:
+            self.requests.append({"token": token, "method": method, "path": path, **kwargs})
+            return UpstreamResponse(
+                status=200,
+                headers={"Content-Type": "text/vtt"},
+                body=iter([b"\xef\xbb\xbfWEBVTT\r\n\r\nRegion: id:subtitle width:80%\r\n\r\n", b"00:00:01.000 --> 00:00:02.000 region:subtitle\r\nHello\r\n"]),
+            )
+
+    media = SubtitleAdapter()
+    client = _app(tmp_path, {"media": media, "files": FakeAdapter()}).test_client()
+    client.post("/api/auth/media/login", json={"username": "alice", "password": "correct horse"})
+
+    response = client.get("/api/media/subtitles/item-123/source-456/0.vtt")
+
+    assert response.status_code == 200
+    assert response.content_type == "text/vtt; charset=utf-8"
+    assert response.data == b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n"
+    assert media.requests[-1]["path"] == "Videos/item-123/source-456/Subtitles/0/Stream.vtt"
+
+
 def test_stream_ticket_accepts_jellyfin_hyphenated_item_id(tmp_path) -> None:
     media = FakeAdapter()
     app = _app(tmp_path, {"media": media, "files": FakeAdapter()})
@@ -188,6 +211,47 @@ def test_stream_ticket_accepts_jellyfin_hyphenated_item_id(tmp_path) -> None:
 
     assert response.status_code == 200
     assert media.requests[-1]["path"].startswith("Videos/461ecbe3-269e-e480")
+
+
+def test_hls_segment_retries_before_sending_a_truncated_upstream_body(tmp_path) -> None:
+    class TruncatedSegmentAdapter(FakeAdapter):
+        def request(self, token: str, method: str, path: str, **kwargs) -> UpstreamResponse:
+            self.requests.append({"token": token, "method": method, "path": path, **kwargs})
+            if len(self.requests) == 1:
+                def truncated_body():
+                    yield b"partial-"
+                    raise ChunkedEncodingError("upstream segment ended early")
+
+                body = truncated_body()
+            else:
+                body = iter([b"complete-segment"])
+            return UpstreamResponse(
+                status=200,
+                headers={"Content-Type": "video/mp2t", "Content-Length": "16"},
+                body=body,
+            )
+
+    media = TruncatedSegmentAdapter()
+    app = _app(tmp_path, {"media": media, "files": FakeAdapter()})
+    client = app.test_client()
+    login = client.post(
+        "/api/auth/media/login",
+        json={"username": "alice", "password": "correct horse"},
+    )
+    item_id = "461ecbe3269ee48076526b2f9906adf0"
+    ticket = client.post(
+        "/api/media/tickets",
+        json={"itemId": item_id},
+        headers={"X-CSRF-Token": login.json["csrf"]},
+    ).json["ticket"]
+
+    response = client.get(
+        f"/api/media/stream/{ticket}/videos/461ecbe3-269e-e480-7652-6b2f9906adf0/hls1/main/1.ts",
+    )
+
+    assert response.status_code == 200
+    assert response.data == b"complete-segment"
+    assert len(media.requests) == 2
 
 
 def test_large_proxy_body_stays_streamed_with_content_length(tmp_path) -> None:
