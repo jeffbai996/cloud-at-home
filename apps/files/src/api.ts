@@ -24,12 +24,20 @@ export type StorageUsage = { total: number; used: number };
 
 let csrf = "";
 
+// App registers a handler here so a mid-session 401 (expired upstream token —
+// the gateway has already cleared our cookie) drops us straight to the login
+// view instead of leaving a wall of failed requests behind a stale UI.
+let onSessionLost: (() => void) | null = null;
+export function setSessionLostHandler(fn: () => void): void { onSessionLost = fn; }
+
 async function request(url: string, options: RequestInit = {}, expectJson = true) {
   const headers = new Headers(options.headers);
   if (csrf && options.method && options.method !== "GET") headers.set("X-CSRF-Token", csrf);
   if (options.body && typeof options.body === "string") headers.set("Content-Type", "application/json");
   const response = await fetch(url, { ...options, headers, credentials: "include" });
   if (!response.ok) {
+    // Not for the initial session probe — that 401 just means "show login".
+    if (response.status === 401 && !url.endsWith("/session")) onSessionLost?.();
     const payload = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
     throw new Error(payload.error ?? "Request failed");
   }
@@ -141,8 +149,11 @@ export async function createUser(username: string, password: string, admin: bool
   });
 }
 
-export async function deleteUser(id: number): Promise<void> {
-  await request(`/api/files/proxy/users/${id}`, { method: "DELETE" }, false);
+export async function deleteUser(id: number, currentPassword: string): Promise<void> {
+  await request(`/api/files/proxy/users/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify({ current_password: currentPassword }),
+  }, false);
 }
 
 export async function getStorageUsage(): Promise<StorageUsage> {

@@ -94,7 +94,7 @@ export function FileViewer({ file, path, onClose }: { file: Resource; path: stri
   const editorAction = (id: string) => { void editorRef.current?.getAction(id)?.run(); editorRef.current?.focus(); };
 
   return (
-    <div className="viewer">
+    <div className={`viewer viewer-${kind} ${isText ? "viewer-text" : ""}`}>
       <header className="viewer-header">
         <div><strong>{file.name}{dirty ? " •" : ""}</strong><span>{formatBytes(file.size)} · {mode === "edit" ? "Editable" : mode === "read" ? "Read only" : "Download only"}</span></div>
         <div className="viewer-actions">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { editorModeFor, extensionFor, isTextFile, joinPath, languageForFile, viewerKindFor } from "./file-utils";
+import { editorModeFor, exactTimestamp, extensionFor, isTextFile, joinPath, languageForFile, relativeTimestamp, togglePath, viewerKindFor } from "./file-utils";
 
 describe("file utilities", () => {
   it("joins paths without producing traversal or duplicate slashes", () => {
@@ -32,5 +32,24 @@ describe("file utilities", () => {
     expect(viewerKindFor("README.md")).toBe("markdown");
     expect(viewerKindFor("report.html")).toBe("html");
     expect(viewerKindFor("bundle.zip")).toBe("download");
+  });
+
+  it("adds and removes quick access paths without duplicates", () => {
+    expect(togglePath(["/Documents"], "/Downloads")).toEqual(["/Documents", "/Downloads"]);
+    expect(togglePath(["/Documents", "/Downloads"], "/Documents")).toEqual(["/Downloads"]);
+  });
+
+  it("summarizes recent modified times without hiding the exact timestamp", () => {
+    const now = new Date("2026-07-11T12:00:00").valueOf();
+    expect(relativeTimestamp("2026-07-11T11:55:00", now, "en-US")).toBe("5m ago");
+    expect(relativeTimestamp("2026-07-11T09:00:00", now, "en-US")).toBe("3h ago");
+    expect(relativeTimestamp("2026-07-08T12:00:00", now, "en-US")).toBe("3d ago");
+    expect(exactTimestamp("2026-07-11T01:30:00", "en-US")).toContain("Jul 11, 2026");
+  });
+
+  it("handles missing or malformed modified times", () => {
+    expect(relativeTimestamp("", Date.now(), "en-US")).toBe("Unavailable");
+    expect(relativeTimestamp("not-a-date", Date.now(), "en-US")).toBe("Unavailable");
+    expect(exactTimestamp("not-a-date", "en-US")).toBe("Unavailable");
   });
 });

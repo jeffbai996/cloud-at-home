@@ -14,10 +14,12 @@ import {
   FolderPlus,
   Grid2X2,
   HardDrive,
+  Info,
   List,
   Move,
   LogOut,
   Pencil,
+  Pin,
   RefreshCw,
   Search,
   Settings,
@@ -45,6 +47,7 @@ import {
   logout,
   purgeTrash,
   restoreTrash,
+  setSessionLostHandler,
   transformResource,
   trash,
   uploadFile,
@@ -54,7 +57,7 @@ import {
   type StorageUsage,
   type TrashEntry,
 } from "./api";
-import { joinPath } from "./file-utils";
+import { exactTimestamp, joinPath, relativeTimestamp, togglePath } from "./file-utils";
 
 type Prompt = null | { type: "new-folder" | "new-file" | "rename" | "move" | "copy"; item?: Resource };
 type Collection = "browse" | "recent" | "favorites";
@@ -70,6 +73,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"grid" | "list">(() => localStorage.getItem("files-view") === "list" ? "list" : "grid");
   const [selected, setSelected] = useState<Resource | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [viewer, setViewer] = useState<Resource | null>(null);
   const [prompt, setPrompt] = useState<Prompt>(null);
   const [admin, setAdmin] = useState(false);
@@ -84,18 +88,29 @@ export default function App() {
   const [usage, setUsage] = useState<StorageUsage | null>(null);
   const [showHidden, setShowHidden] = useState(() => localStorage.getItem("cloud-drive-show-hidden") === "true");
   const [rootFolders, setRootFolders] = useState<Resource[]>([]);
+  const [quickAccessPaths, setQuickAccessPaths] = useState<string[]>(() => readStringList("cloud-drive-quick-access"));
   const uploadInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => { void getSession().then(setSession); }, []);
+  // A mid-session 401 means the upstream token expired and the gateway cleared
+  // our cookie — drop to the login view instead of a stalled UI full of errors.
+  useEffect(() => { setSessionLostHandler(() => { setSession(null); setError(""); }); }, []);
   useEffect(() => { if (session) void load(path); }, [path, session]);
   useEffect(() => { localStorage.setItem("files-view", view); }, [view]);
   useEffect(() => { localStorage.setItem("cloud-drive-favorites", JSON.stringify(favorites)); }, [favorites]);
   useEffect(() => { localStorage.setItem("cloud-drive-recent", JSON.stringify(recent)); }, [recent]);
   useEffect(() => { localStorage.setItem("cloud-drive-show-hidden", String(showHidden)); }, [showHidden]);
+  useEffect(() => { localStorage.setItem("cloud-drive-quick-access", JSON.stringify(quickAccessPaths)); }, [quickAccessPaths]);
+  useEffect(() => {
+    if (!rootFolders.length || localStorage.getItem("cloud-drive-quick-access-initialized") === "true") return;
+    const initial = rootFolders.slice().sort((left, right) => quickAccessRank(left.name) - quickAccessRank(right.name) || left.name.localeCompare(right.name)).slice(0, 5).map((item) => joinPath("/", item.name));
+    setQuickAccessPaths(initial);
+    localStorage.setItem("cloud-drive-quick-access-initialized", "true");
+  }, [rootFolders]);
 
   async function load(next = path) {
     setLoading(true); setError("");
-    try { const nextResource = await getResource(next); setResource(nextResource); if (next === "/") setRootFolders((nextResource.items ?? []).filter((item) => item.isDir && !item.name.startsWith("."))); setSelected(null); void getStorageUsage().then(setUsage).catch(() => undefined); history.replaceState(null, "", `?path=${encodeURIComponent(next)}`); }
+    try { const nextResource = await getResource(next); setResource(nextResource); if (next === "/") setRootFolders((nextResource.items ?? []).filter((item) => item.isDir && !item.name.startsWith("."))); setSelected(null); setDetailsOpen(false); void getStorageUsage().then(setUsage).catch(() => undefined); history.replaceState(null, "", `?path=${encodeURIComponent(next)}`); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load folder"); }
     finally { setLoading(false); }
   }
@@ -159,7 +174,7 @@ export default function App() {
   }
 
   const sourceItems = collection === "recent" ? recent : collection === "favorites" ? favorites : resource?.items ?? [];
-  const items = useMemo(() => sourceItems.filter((item) => item.name !== ".cloud-drive-trash" && (showHidden || !item.name.startsWith(".")) && item.name.toLowerCase().includes(query.toLowerCase())), [query, showHidden, sourceItems]);
+  const items = useMemo(() => sourceItems.filter((item) => item.name !== ".cloud-home-trash" && (showHidden || !item.name.startsWith(".")) && item.name.toLowerCase().includes(query.toLowerCase())), [query, showHidden, sourceItems]);
   const crumbs = path.split("/").filter(Boolean);
   const itemPath = (item: Resource) => item.url || item.path || joinPath(path, item.name);
 
@@ -167,21 +182,21 @@ export default function App() {
   if (!session) return <AppShell kind="files" brand="Cloud Drive"><LoginView service="Cloud Drive" onSubmit={signIn} loading={loading} error={loginError} /></AppShell>;
 
   return (
-    <AppShell kind="files" brand="Cloud Drive" actions={<><div className="file-search"><Search size={16} /><input placeholder="Search Cloud Drive" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <button onClick={() => setQuery("")}><X size={14} /></button>}</div><button className="icon-button" aria-label="Open Control Panel" onClick={() => setAdmin(true)}><Settings size={18} /></button><button className="icon-button" aria-label="Sign out" onClick={() => void signOut()}><LogOut size={18} /></button></>}>
+    <AppShell kind="files" brand="Cloud Drive" actions={<><div className="file-search"><Search size={16} /><input placeholder="Search Cloud Drive" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <button onClick={() => setQuery("")}><X size={14} /></button>}</div><button className="icon-button" aria-label="Open Control Panel" onClick={() => setAdmin(true)}><Settings size={18} /></button></>} navigation={<button className="icon-button topbar-signout" aria-label="Sign out" title="Sign out" onClick={() => void signOut()}><LogOut size={18} /></button>}>
       <div className="files-layout">
         <aside className="files-sidebar">
           <nav>
-            <div className="sidebar-section"><span>Locations</span><button className={collection === "browse" && path === "/" ? "active" : ""} onClick={() => browse("/")}><HardDrive size={17} /> Cloud Drive</button><button className={collection === "recent" ? "active" : ""} onClick={() => { setCollection("recent"); setSelected(null); }}><Clock3 size={17} /> Recents</button><button className={collection === "favorites" ? "active" : ""} onClick={() => { setCollection("favorites"); setSelected(null); }}><Star size={17} /> Favorites</button></div>
-            {rootFolders.length > 0 && <div className="sidebar-section quick-access"><span>Quick Access</span>{rootFolders.slice().sort((left, right) => quickAccessRank(left.name) - quickAccessRank(right.name) || left.name.localeCompare(right.name)).slice(0, 5).map((item) => <button key={item.name} onClick={() => browse(itemPath(item))}><Folder size={17} />{item.name}</button>)}</div>}
-            <div className="sidebar-section"><span>Manage</span><button onClick={() => { setAdminTab("shares"); setAdmin(true); }}><Share2 size={17} /> Shared Links</button><button onClick={() => void showTrash()}><Trash2 size={17} /> Trash</button><button onClick={() => { setAdminTab("users"); setAdmin(true); }}><Settings size={17} /> Control Panel</button></div>
+            <div className="sidebar-section"><span>Locations</span><button className={collection === "browse" && path === "/" ? "active" : ""} onClick={() => browse("/")}><HardDrive size={17} /> Drive</button><button className={collection === "recent" ? "active" : ""} onClick={() => { setCollection("recent"); setSelected(null); }}><Clock3 size={17} /> Recents</button><button className={collection === "favorites" ? "active" : ""} onClick={() => { setCollection("favorites"); setSelected(null); }}><Star size={17} /> Favorites</button></div>
+            {quickAccessPaths.length > 0 && <div className="sidebar-section quick-access"><span>Quick Access</span>{quickAccessPaths.map((quickPath) => <div className="quick-access-row" key={quickPath}><button title={quickPath} onClick={() => browse(quickPath)}><Folder size={17} /><span>{quickPath.split("/").filter(Boolean).pop()}</span></button><button className="quick-access-remove" aria-label={`Remove ${quickPath} from Quick Access`} title="Remove from Quick Access" onClick={() => setQuickAccessPaths((current) => togglePath(current, quickPath))}><X size={13} /></button></div>)}</div>}
+            <div className="sidebar-section"><span>Manage</span><button onClick={() => { setAdminTab("shares"); setAdmin(true); }}><Share2 size={17} /> Sharing</button><button onClick={() => void showTrash()}><Trash2 size={17} /> Trash</button><button onClick={() => { setAdminTab("users"); setAdmin(true); }}><Settings size={17} /> Control Panel</button></div>
           </nav>
           <div className="sidebar-bottom">{usage && <StorageMeter usage={usage} />}<div className="sidebar-foot"><div><span>Signed in as</span><strong>{session.user.name}</strong></div><button aria-label="Sign out" title="Sign out" onClick={() => void signOut()}><LogOut size={16} /></button></div></div>
         </aside>
-        <section className={`files-main ${dropActive ? "drop-active" : ""}`} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) setDropActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false); }} onDrop={(event) => { event.preventDefault(); setDropActive(false); if (!event.dataTransfer.types.includes("application/x-cloud-drive-path")) void upload(event.dataTransfer.files); }}>
+        <section className={`files-main ${dropActive ? "drop-active" : ""}`} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) setDropActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false); }} onDrop={(event) => { event.preventDefault(); setDropActive(false); if (!event.dataTransfer.types.includes("application/x-cloud-home-path")) void upload(event.dataTransfer.files); }}>
           <header className="files-toolbar">
-            <div className="breadcrumbs">{collection !== "browse" ? <strong>{collection === "recent" ? "Recents" : "Favorites"}</strong> : <><button onClick={() => browse("/")}>Drive</button>{crumbs.map((crumb, index) => <span key={`${crumb}-${index}`}><ChevronRight size={14} /><button onClick={() => browse(`/${crumbs.slice(0, index + 1).join("/")}`)}>{decodeURIComponent(crumb)}</button></span>)}</>}</div>
+            <div className="breadcrumbs">{collection !== "browse" ? <strong>{collection === "recent" ? "Recents" : "Favorites"}</strong> : <><button onClick={() => browse("/")}>Drive</button><span><ChevronRight size={14} /><button onClick={() => browse("/")}>home</button></span>{crumbs.map((crumb, index) => <span key={`${crumb}-${index}`}><ChevronRight size={14} /><button onClick={() => browse(`/${crumbs.slice(0, index + 1).join("/")}`)}>{decodeURIComponent(crumb)}</button></span>)}</>}</div>
             <div className="toolbar-actions">
-              {selected && <>{!selected.isDir && <a className="icon-button" aria-label="Download" title="Download" href={rawUrl(itemPath(selected), false)} download><Download size={17} /></a>}<button className="icon-button" aria-label="Favorite" title="Favorite" onClick={() => toggleFavorite(selected)}><Star size={17} fill={favorites.some((entry) => entry.path === itemPath(selected)) ? "currentColor" : "none"} /></button><button className="icon-button" aria-label="Rename" title="Rename" onClick={() => setPrompt({ type: "rename", item: selected })}><Pencil size={17} /></button><button className="icon-button" aria-label="Copy" title="Copy" onClick={() => setPrompt({ type: "copy", item: selected })}><Copy size={17} /></button><button className="icon-button" aria-label="Move" title="Move" onClick={() => setPrompt({ type: "move", item: selected })}><Move size={17} /></button><button className="icon-button toolbar-danger" aria-label="Move to Trash" title="Move to Trash" onClick={() => void deleteSelected()}><Trash2 size={17} /></button><span className="toolbar-divider" /></>}
+              {selected && <><button className={`icon-button ${detailsOpen ? "active" : ""}`} aria-label="File details" title="File details" onClick={() => setDetailsOpen((value) => !value)}><Info size={17} /></button>{!selected.isDir && <a className="icon-button" aria-label="Download" title="Download" href={rawUrl(itemPath(selected), false)} download><Download size={17} /></a>}{selected.isDir && <button className={`icon-button ${quickAccessPaths.includes(itemPath(selected)) ? "active" : ""}`} aria-label={quickAccessPaths.includes(itemPath(selected)) ? "Remove from Quick Access" : "Add to Quick Access"} title={quickAccessPaths.includes(itemPath(selected)) ? "Remove from Quick Access" : "Add to Quick Access"} onClick={() => setQuickAccessPaths((current) => togglePath(current, itemPath(selected)))}><Pin size={17} fill={quickAccessPaths.includes(itemPath(selected)) ? "currentColor" : "none"} /></button>}<button className="icon-button" aria-label="Favorite" title="Favorite" onClick={() => toggleFavorite(selected)}><Star size={17} fill={favorites.some((entry) => entry.path === itemPath(selected)) ? "currentColor" : "none"} /></button><button className="icon-button" aria-label="Rename" title="Rename" onClick={() => setPrompt({ type: "rename", item: selected })}><Pencil size={17} /></button><button className="icon-button" aria-label="Copy" title="Copy" onClick={() => setPrompt({ type: "copy", item: selected })}><Copy size={17} /></button><button className="icon-button" aria-label="Move" title="Move" onClick={() => setPrompt({ type: "move", item: selected })}><Move size={17} /></button><button className="icon-button toolbar-danger" aria-label="Move to Trash" title="Move to Trash" onClick={() => void deleteSelected()}><Trash2 size={17} /></button><span className="toolbar-divider" /></>}
               <input ref={uploadInput} hidden multiple type="file" onChange={(event) => void upload(event.target.files)} />
               <button className="icon-button" aria-label="Upload" title="Upload" onClick={() => uploadInput.current?.click()}><Upload size={18} /></button>
               <button className="icon-button" aria-label="Refresh folder" title="Refresh folder" onClick={() => void load()}><RefreshCw size={17} /></button>
@@ -191,15 +206,16 @@ export default function App() {
               <button className="icon-button" aria-label="New file" title="New file" onClick={() => setPrompt({ type: "new-file" })}><FilePlus2 size={18} /></button>
             </div>
           </header>
+          <AnimatePresence>{selected && detailsOpen && <FileDetails item={selected} path={itemPath(selected)} onClose={() => setDetailsOpen(false)} />}</AnimatePresence>
           {error && <div className="files-error">{error}<button onClick={() => setError("")}><X size={15} /></button></div>}
           {Object.keys(uploads).length > 0 && <div className="upload-stack">{Object.entries(uploads).map(([name, progress]) => <div key={name}><span>{name}</span><div><i style={{ width: `${progress * 100}%` }} /></div><strong>{Math.round(progress * 100)}%</strong></div>)}</div>}
           {dropActive && <div className="file-drop-zone"><Upload /><strong>Drop to upload</strong><span>Files will be added to this folder</span></div>}
-          {loading && collection === "browse" ? <FileSkeleton view={view} /> : items.length ? <div className={`file-view file-view-${view}`}>{items.map((item) => { const currentPath = itemPath(item); return <FileItem key={`${currentPath}-${item.name}`} item={item} path={currentPath} selected={itemPath(selected ?? { ...item, name: "" }) === currentPath && selected?.name === item.name} view={view} onClick={() => setSelected(item)} onOpen={() => openResource(item, currentPath)} onMoveInto={(source) => void moveIntoFolder(source, item)} />; })}</div> : <EmptyState title={query ? "No matching files" : collection === "recent" ? "No recent files" : collection === "favorites" ? "No favorites yet" : "This folder is empty"} body={query ? "Try another filename." : collection === "favorites" ? "Select a file or folder and add it to Favorites." : collection === "recent" ? "Files you open will appear here." : "Drop files anywhere or create a folder."} icon={collection === "favorites" ? <Star /> : collection === "recent" ? <Clock3 /> : <Folder />} />}
+          {loading && collection === "browse" ? <FileSkeleton view={view} /> : items.length ? <div className={`file-view file-view-${view}`}>{items.map((item) => { const currentPath = itemPath(item); return <FileItem key={`${currentPath}-${item.name}`} item={item} path={currentPath} selected={itemPath(selected ?? { ...item, name: "" }) === currentPath && selected?.name === item.name} view={view} onClick={() => { setSelected(item); setDetailsOpen(false); }} onOpen={() => openResource(item, currentPath)} onMoveInto={(source) => void moveIntoFolder(source, item)} />; })}</div> : <EmptyState title={query ? "No matching files" : collection === "recent" ? "No recent files" : collection === "favorites" ? "No favorites yet" : "This folder is empty"} body={query ? "Try another filename." : collection === "favorites" ? "Select a file or folder and add it to Favorites." : collection === "recent" ? "Files you open will appear here." : "Drop files anywhere or create a folder."} icon={collection === "favorites" ? <Star /> : collection === "recent" ? <Clock3 /> : <Folder />} />}
         </section>
       </div>
       {createPortal(<AnimatePresence>{viewer && <motion.div className="viewer-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><FileViewer file={viewer} path={itemPath(viewer)} onClose={() => setViewer(null)} /></motion.div>}</AnimatePresence>, document.body)}
       <OperationPrompt prompt={prompt} onClose={() => setPrompt(null)} onSubmit={(value) => void submitPrompt(value)} />
-      <Modal open={admin} title="Control Panel" onClose={() => setAdmin(false)}><AdminPanel initialTab={adminTab} currentUserId={session.user.id} /></Modal>
+      <Modal open={admin} title="Control Panel" onClose={() => setAdmin(false)}><AdminPanel initialTab={adminTab} currentUserId={session.user.id} usage={usage} /></Modal>
       <Modal open={trashOpen} title="Trash" onClose={() => setTrashOpen(false)}><TrashPanel entries={trashItems} onRestore={async (id) => { await restoreTrash(id); setTrashItems(await listTrash()); await load(); }} onPurge={async (id) => { await purgeTrash(id); setTrashItems(await listTrash()); }} /></Modal>
     </AppShell>
   );
@@ -208,10 +224,16 @@ export default function App() {
 function FileItem({ item, path, selected, view, onClick, onOpen, onMoveInto }: { item: Resource; path: string; selected: boolean; view: "grid" | "list"; onClick: () => void; onOpen: () => void; onMoveInto: (source: string) => void }) {
   const Icon = item.isDir ? Folder : fileIcon(item.name);
   const image = !item.isDir && isImageName(item.name);
-  function dragStart(event: ReactDragEvent<HTMLDivElement>) { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("application/x-cloud-drive-path", path); event.dataTransfer.setData("text/plain", path); }
-  function dragOver(event: ReactDragEvent<HTMLDivElement>) { if (item.isDir && event.dataTransfer.types.includes("application/x-cloud-drive-path")) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; event.currentTarget.classList.add("drop-target"); } }
-  function drop(event: ReactDragEvent<HTMLDivElement>) { event.currentTarget.classList.remove("drop-target"); if (!item.isDir) return; const source = event.dataTransfer.getData("application/x-cloud-drive-path"); if (source) { event.preventDefault(); event.stopPropagation(); onMoveInto(source); } }
-  return <div className={`file-item ${selected ? "selected" : ""}`} draggable onDragStart={dragStart} onDragOver={dragOver} onDragLeave={(event) => event.currentTarget.classList.remove("drop-target")} onDrop={drop}><button type="button" className="file-target" aria-label={item.name} onClick={onClick} onDoubleClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen(); } }}><span className={`file-icon ${item.isDir ? "folder" : ""} ${image ? "image-preview" : ""}`}>{image ? <img src={rawUrl(path)} alt="" loading="lazy" /> : <Icon />}</span><span className="file-name"><strong>{item.name}</strong>{!item.isDir && <small>{formatBytes(item.size)}</small>}</span><span className="file-modified">{formatDate(item.modified)}</span></button><button type="button" className="item-more" aria-label={`Open ${item.name}`} title={`Open ${item.name}`} onClick={onOpen}>{item.isDir ? <ChevronRight size={17} /> : <Eye size={17} />}</button></div>;
+  function dragStart(event: ReactDragEvent<HTMLDivElement>) { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("application/x-cloud-home-path", path); event.dataTransfer.setData("text/plain", path); }
+  function dragOver(event: ReactDragEvent<HTMLDivElement>) { if (item.isDir && event.dataTransfer.types.includes("application/x-cloud-home-path")) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; event.currentTarget.classList.add("drop-target"); } }
+  function drop(event: ReactDragEvent<HTMLDivElement>) { event.currentTarget.classList.remove("drop-target"); if (!item.isDir) return; const source = event.dataTransfer.getData("application/x-cloud-home-path"); if (source) { event.preventDefault(); event.stopPropagation(); onMoveInto(source); } }
+  const modified = exactTimestamp(item.modified);
+  return <div className={`file-item ${selected ? "selected" : ""}`} draggable onDragStart={dragStart} onDragOver={dragOver} onDragLeave={(event) => event.currentTarget.classList.remove("drop-target")} onDrop={drop}><button type="button" className="file-target" aria-label={item.name} onClick={onClick} onDoubleClick={onOpen} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onOpen(); } }}><span className={`file-icon ${item.isDir ? "folder" : ""} ${image ? "image-preview" : ""}`}>{image ? <img src={rawUrl(path)} alt="" loading="lazy" /> : <Icon />}</span><span className="file-name"><strong>{item.name}</strong>{!item.isDir && <small>{formatBytes(item.size)}</small>}</span><time className="file-modified" dateTime={item.modified} title={`Modified ${modified}`}>{relativeTimestamp(item.modified)}</time></button><button type="button" className="item-more" aria-label={`Open ${item.name}`} title={`Open ${item.name}`} onClick={onOpen}>{item.isDir ? <ChevronRight size={17} /> : <Eye size={17} />}</button></div>;
+}
+
+function FileDetails({ item, path, onClose }: { item: Resource; path: string; onClose: () => void }) {
+  const kind = item.isDir ? "Folder" : item.extension?.replace(/^\./, "").toUpperCase() || item.type || "File";
+  return <motion.aside className="file-details" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}><div className="file-details-name"><span className="file-icon">{item.isDir ? <Folder /> : <File />}</span><div><strong>{item.name}</strong><span title={path}>{path}</span></div></div><dl><div><dt>Modified</dt><dd>{exactTimestamp(item.modified)}</dd></div><div><dt>Type</dt><dd>{kind}</dd></div><div><dt>Size</dt><dd>{item.isDir ? `${item.numFiles ?? 0} files · ${item.numDirs ?? 0} folders` : formatBytes(item.size)}</dd></div></dl><button aria-label="Close file details" title="Close" onClick={onClose}><X size={15} /></button></motion.aside>;
 }
 function FileSkeleton({ view }: { view: "grid" | "list" }) { return <div className={`file-view file-view-${view}`}>{Array.from({ length: 12 }, (_, index) => <Skeleton key={index} className="file-skeleton" />)}</div>; }
 
@@ -223,7 +245,7 @@ function TrashPanel({ entries, onRestore, onPurge }: { entries: TrashEntry[]; on
 function fileIcon(name: string) { const ext = name.split(".").pop()?.toLowerCase(); if (["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext || "")) return FileImage; if (["zip", "tar", "gz", "7z", "rar"].includes(ext || "")) return Archive; if (["txt", "md", "json", "js", "ts", "py", "css", "html", "log"].includes(ext || "")) return FileText; return File; }
 function isImageName(name: string) { return ["jpg", "jpeg", "png", "gif", "webp", "svg", "avif"].includes(name.split(".").pop()?.toLowerCase() || ""); }
 function formatBytes(value: number) { if (!value) return "0 B"; const units = ["B", "KB", "MB", "GB", "TB"]; const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1); return `${(value / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`; }
-function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: date.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined }).format(date); }
 function readSavedResources(key: string): SavedResource[] { try { const value = JSON.parse(localStorage.getItem(key) ?? "[]"); return Array.isArray(value) ? value : []; } catch { return []; } }
+function readStringList(key: string): string[] { try { const value = JSON.parse(localStorage.getItem(key) ?? "[]"); return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []; } catch { return []; } }
 function quickAccessRank(name: string): number { const preferred = ["Desktop", "Documents", "Downloads", "tv-movies", "tv-shows", "local-projects"]; const index = preferred.indexOf(name); return index === -1 ? preferred.length : index; }
 function StorageMeter({ usage }: { usage: StorageUsage }) { const total = Math.max(0, Number(usage.total) || 0); const used = Math.max(0, Number(usage.used) || 0); const percent = total > 0 ? Math.min(100, used / total * 100) : 0; return <div className="storage-meter"><div><span>Storage</span><strong>{formatBytes(Math.max(0, total - used))} free</strong></div><div className="storage-track"><i style={{ width: `${percent}%` }} /></div><small>{formatBytes(used)} of {formatBytes(total)} used</small></div>; }

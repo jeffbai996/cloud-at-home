@@ -65,6 +65,35 @@ export function joinPath(parent: string, child: string): string {
   return `/${safe.join("/")}`;
 }
 
+export function togglePath(paths: string[], path: string): string[] {
+  return paths.includes(path) ? paths.filter((entry) => entry !== path) : [...paths, path];
+}
+
+export function relativeTimestamp(value: string, now = Date.now(), locale?: string): string {
+  const timestamp = new Date(value).valueOf();
+  if (!Number.isFinite(timestamp)) return "Unavailable";
+  const elapsed = Math.max(0, now - timestamp);
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const date = new Date(timestamp);
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() === new Date(now).getFullYear() ? undefined : "numeric",
+  }).format(date);
+}
+
+export function exactTimestamp(value: string, locale?: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.valueOf())) return "Unavailable";
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
 export function editorModeFor(bytes: number): EditorMode {
   if (bytes <= 5 * 1024 * 1024) return "edit";
   if (bytes <= 50 * 1024 * 1024) return "read";
