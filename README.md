@@ -1,6 +1,6 @@
 # cloud-at-home
 
-![Version](https://img.shields.io/badge/version-0.2.0-208cff?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.3.0-208cff?style=flat-square)
 ![Stage](https://img.shields.io/badge/stage-alpha-334155?style=flat-square)
 ![Self-hosted](https://img.shields.io/badge/deployment-self--hosted-0f766e?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/frontend-TypeScript-3178c6?style=flat-square)
@@ -12,10 +12,10 @@
 
 Self-hosted web applications backed by established services:
 
-- **Video** — a custom Jellyfin client with profiles, resume history, subtitles, favorites, lists, search, and responsive playback
-- **Cloud Drive** — a Finder-style FileBrowser client with editing, previews, transfers, user controls, and recoverable trash
+- **Video** — a custom Jellyfin client with profiles, resume history, subtitles, favorites, lists, search, classification and country metadata, and hardened cross-device playback
+- **Cloud Drive** — a Finder-style FileBrowser client with editing, previews, transfers, quick-access pins, file details, user controls, and recoverable trash
 - **Service switcher** — navigation between video, files, local AI, and optional services
-- **Gateway** — encrypted upstream sessions, scoped proxy policies, preferences, playback tickets, and trash metadata
+- **Gateway** — encrypted upstream sessions, scoped proxy policies, preferences, playback tickets, same-origin subtitle delivery, and trash metadata
 
 ## Preview
 
