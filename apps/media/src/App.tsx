@@ -1,13 +1,14 @@
 import { Check, ChevronDown, Clapperboard, Clock3, ExternalLink, Film, Flag, Heart, House, Info, ListPlus, LogOut, Menu, Pin, Play, Plus, RefreshCw, RotateCcw, Search, Shuffle, Trash2, Tv, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell, Button, EmptyState, Modal, Skeleton } from "@cloud-at-home/ui";
 import { clearWatchHistory, getMediaItem, getSeriesEpisodes, getSession, imageUrl, loadHome, login, logout, removeWatchHistoryItem, search, type MediaItem, type Session } from "./api";
 import { Player } from "./Player";
 import { createMediaList, MAX_LIST_NAME_LENGTH, normalizeListName, toggleListItem, validPromotedListId, type MediaList } from "./lists";
 import { mobileHeaderScrollIntent } from "./mobileHeader";
-import { countryPresentation, scoreSource, type ScoreKind } from "./mediaMetadata";
+import { countryPills, productionDetails, scoreSource, seriesCardMeta, seriesYearRange, studioLabel, type ScoreKind } from "./mediaMetadata";
+import { countryFlagPath } from "./countryFlags";
 import { isResumable } from "./playback";
 import { ratingBadge } from "./rating";
 import { buildMovieShelves } from "./shelves";
@@ -65,27 +66,6 @@ export default function App() {
     setFavorites((saved) => saved.map((item) => currentItems.get(item.Id) ?? item));
     setLists((saved) => saved.map((list) => ({ ...list, items: list.items.map((item) => currentItems.get(item.Id) ?? item) })));
   }, [home]);
-  useEffect(() => {
-    if (!selected) return;
-    const scrollY = window.scrollY;
-    const previous = {
-      position: document.body.style.position,
-      top: document.body.style.top,
-      width: document.body.style.width,
-      overflow: document.body.style.overflow,
-    };
-    document.body.style.position = "fixed";
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = "100%";
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.position = previous.position;
-      document.body.style.top = previous.top;
-      document.body.style.width = previous.width;
-      document.body.style.overflow = previous.overflow;
-      window.scrollTo(0, scrollY);
-    };
-  }, [selected]);
   useEffect(() => {
     const closeEmptySearch = (event: PointerEvent) => {
       if (!mobileSearchOpen || query || searchShellRef.current?.contains(event.target as Node)) return;
@@ -190,8 +170,20 @@ export default function App() {
   }
 
   function play(item: MediaItem, fromBeginning = false) {
-    setHeaderCollapsed(true);
     setPlaying({ item, fromBeginning });
+  }
+
+  async function playFromCard(item: MediaItem) {
+    if (item.Type !== "Series") { play(item); return; }
+    if (!session) return;
+    try {
+      const episodes = await getSeriesEpisodes(item.Id, session.user.id);
+      const episode = episodes.find((entry) => !entry.UserData?.Played) ?? episodes[0];
+      if (episode) { play(withSeriesMetadata(episode, item)); return; }
+    } catch {
+      // Opening details is a useful fallback when Jellyfin cannot resolve an episode.
+    }
+    setSelected(item);
   }
 
   async function returnToSeries(episode: MediaItem) {
@@ -253,11 +245,11 @@ export default function App() {
     >
       {headerCollapsed && !playing && <div className="cloud-media-header-reveal-zone" onMouseEnter={() => setHeaderCollapsed(false)}><button className="cloud-media-header-restore" aria-label="Restore Video header" onClick={() => setHeaderCollapsed(false)}><ChevronDown size={17} /><span>Show header</span></button></div>}
       {query ? (
-        <section className="media-page search-page"><div className="section-heading"><div><span className="eyebrow">Search</span><h1>{results.length ? `Results for “${query}”` : "No matches yet"}</h1></div></div><MediaGrid items={results} onSelect={setSelected} /></section>
+        <section className="media-page search-page"><div className="section-heading"><div><span className="eyebrow">Search</span><h1>{results.length ? `Results for “${query}”` : "No matches yet"}</h1></div></div><MediaGrid items={results} onSelect={setSelected} onPlay={(item) => void playFromCard(item)} /></section>
       ) : libraryView === "favorites" ? (
-        <section className="media-page favorites-page"><div className="section-heading"><div><span className="eyebrow">Saved</span><h1>Favorites</h1></div></div><MediaGrid items={favorites} onSelect={setSelected} /></section>
+        <section className="media-page favorites-page"><div className="section-heading"><div><span className="eyebrow">Saved</span><h1>Favorites</h1></div></div><MediaGrid items={favorites} onSelect={setSelected} onPlay={(item) => void playFromCard(item)} /></section>
       ) : libraryView === "list" && activeList ? (
-        <section className="media-page list-page"><div className="section-heading"><div><span className="eyebrow">List</span><h1>{activeList.name}</h1></div></div><MediaGrid items={activeList.items} onSelect={setSelected} /></section>
+        <section className="media-page list-page"><div className="section-heading"><div><span className="eyebrow">List</span><h1>{activeList.name}</h1></div></div><MediaGrid items={activeList.items} onSelect={setSelected} onPlay={(item) => void playFromCard(item)} /></section>
       ) : !home ? (
         homeError
           ? <section className="media-page media-error-state"><EmptyState title="Couldn’t load Video" body={homeError} icon={<Film />} /><Button variant="secondary" onClick={() => void refreshHome(session)}>Retry</Button></section>
@@ -266,16 +258,21 @@ export default function App() {
         <>
           {hero && <Hero item={hero} onPlay={(fromBeginning) => play(hero, fromBeginning)} onInfo={() => setSelected(hero)} />}
           <div className="media-rails">
-            {home.resume.length > 0 && <MediaRail id="continue-watching" title="Continue watching" items={home.resume} onSelect={setSelected} />}
-            <MediaRail id="recently-added" title="Recently added" items={home.latest} onSelect={setSelected} />
-            <MediaRail id="movies" title="Movies" items={home.movies} onSelect={setSelected} />
-            <MediaRail id="shows" title="TV Series" items={home.series} onSelect={setSelected} />
-            {movieShelves.map((shelf) => <MediaRail key={shelf.id} id={`movies-${shelf.id}`} title={shelf.title} items={shelf.items} onSelect={setSelected} />)}
+            {home.resume.length > 0 && <MediaRail id="continue-watching" title="Continue watching" items={home.resume} onSelect={setSelected} onPlay={(item) => void playFromCard(item)} />}
+            <MediaRail id="recently-added" title="Recently added" items={home.latest} onSelect={setSelected} onPlay={(item) => void playFromCard(item)} />
+            <MediaRail id="movies" title="Movies" items={home.movies} count onSelect={setSelected} onPlay={(item) => void playFromCard(item)} />
+            <MediaRail id="shows" title="TV Series" items={home.series} count onSelect={setSelected} onPlay={(item) => void playFromCard(item)} />
+            {movieShelves.map((shelf) => <MediaRail key={shelf.id} id={`movies-${shelf.id}`} title={shelf.title} items={shelf.items} onSelect={setSelected} onPlay={(item) => void playFromCard(item)} />)}
           </div>
         </>
       )}
-      <AnimatePresence>{selected && <Details item={selected} userId={session.user.id} favorite={favorites.some((entry) => entry.Id === selected.Id)} lists={lists} onToggleFavorite={() => toggleFavorite(selected)} onToggleList={(listId) => toggleItemInList(listId, selected)} onRemoveHistory={() => removeFromHistory(selected)} onManageLists={() => { setSelected(null); setListsOpen(true); }} onClose={() => setSelected(null)} onPlay={(target, fromBeginning) => { play(target, fromBeginning); setSelected(null); }} />}</AnimatePresence>
-      <AnimatePresence>{playing && <Player key={playing.item.Id} item={playing.item} fromBeginning={playing.fromBeginning} session={session} onPlayEpisode={(episode) => play(episode)} onClose={() => { setPlaying(null); setHeaderCollapsed(false); void refreshHome(session); }} />}</AnimatePresence>
+      <AnimatePresence mode="wait">
+        {playing
+          ? <Player key={`player-${playing.item.Id}`} item={playing.item} fromBeginning={playing.fromBeginning} session={session} onPlayEpisode={(episode) => play(episode)} onClose={() => { setPlaying(null); setHeaderCollapsed(false); void refreshHome(session); }} />
+          : selected
+            ? <Details key={`details-${selected.Id}`} item={selected} userId={session.user.id} favorite={favorites.some((entry) => entry.Id === selected.Id)} lists={lists} onToggleFavorite={() => toggleFavorite(selected)} onToggleList={(listId) => toggleItemInList(listId, selected)} onRemoveHistory={() => removeFromHistory(selected)} onManageLists={() => { setSelected(null); setListsOpen(true); }} onClose={() => setSelected(null)} onPlay={(target, fromBeginning) => { play(target, fromBeginning); setSelected(null); }} />
+            : null}
+      </AnimatePresence>
       <ListManager open={listsOpen} lists={lists} promotedListId={promotedListId} onClose={() => setListsOpen(false)} onChange={setLists} onPromote={setPromotedListId} onOpen={showList} />
     </AppShell>
   );
@@ -318,7 +315,7 @@ function WatchlistDropdown({
         data-state={open ? "open" : undefined}
         onClick={() => setOpen((value) => !value)}
       >
-        <ListPlus size={17} /><ChevronDown className="watchlist-caret" size={13} />
+        <ListPlus size={17} />
       </button>
       <AnimatePresence>
         {open && (
@@ -443,7 +440,7 @@ function Hero({ item, onPlay, onInfo }: { item: MediaItem; onPlay: (fromBeginnin
   const resumable = itemCanResume(item);
   return (
     <section className="hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(0,0,0,.93) 0%, rgba(0,0,0,.56) 43%, transparent 76%), linear-gradient(0deg, var(--bg) 0%, transparent 38%), url(${imageUrl(item, art, 1600)})` }}>
-      <motion.div className="hero-copy" initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: .08 }}>
+      <motion.div className="hero-copy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: .08 }}>
         <span className="eyebrow">{item.Type === "Series" ? "SERIES" : "NOW WATCHING"}</span>
         <h1>{item.Name}</h1>
         <div className="hero-meta">{item.ProductionYear && <span>{item.ProductionYear}</span>}{minutes > 0 && <span>{minutes} min</span>}</div>
@@ -454,24 +451,45 @@ function Hero({ item, onPlay, onInfo }: { item: MediaItem; onPlay: (fromBeginnin
   );
 }
 
-function MediaRail({ id, title, items, onSelect }: { id: string; title: string; items: MediaItem[]; onSelect: (item: MediaItem) => void }) {
+function MediaRail({ id, title, items, onSelect, onPlay, count }: { id: string; title: string; items: MediaItem[]; onSelect: (item: MediaItem) => void; onPlay: (item: MediaItem) => void; count?: boolean }) {
   if (!items.length) return null;
-  return <section className="media-rail" id={id}><h2>{title}</h2><div className="rail-scroll">{items.map((item, index) => <MediaCard key={`${item.Id}-${index}`} item={item} onClick={() => onSelect(item)} />)}</div></section>;
+  return <section className="media-rail" id={id}><h2>{title}{count && <span className="rail-count">{items.length}</span>}</h2><div className="rail-scroll">{items.map((item, index) => <MediaCard key={`${item.Id}-${index}`} item={item} onOpen={() => onSelect(item)} onPlay={() => onPlay(item)} />)}</div></section>;
 }
 
-function MediaGrid({ items, onSelect }: { items: MediaItem[]; onSelect: (item: MediaItem) => void }) {
+function MediaGrid({ items, onSelect, onPlay }: { items: MediaItem[]; onSelect: (item: MediaItem) => void; onPlay: (item: MediaItem) => void }) {
   if (!items.length) return <EmptyState title="Nothing hiding back here" body="Try a title, series, or episode name." icon={<Search />} />;
-  return <div className="media-grid">{items.map((item) => <MediaCard key={item.Id} item={item} onClick={() => onSelect(item)} />)}</div>;
+  return <div className="media-grid">{items.map((item) => <MediaCard key={item.Id} item={item} onOpen={() => onSelect(item)} onPlay={() => onPlay(item)} />)}</div>;
 }
 
-function MediaCard({ item, onClick }: { item: MediaItem; onClick: () => void }) {
+const warmedDetailsArt = new Set<string>();
+
+function warmDetailsArt(item: MediaItem) {
+  const src = imageUrl(item, item.BackdropImageTags?.length ? "Backdrop" : "Primary", 1300);
+  if (warmedDetailsArt.has(src)) return;
+  warmedDetailsArt.add(src);
+  const image = new Image();
+  image.decoding = "async";
+  image.src = src;
+}
+
+function MediaCard({ item, onOpen, onPlay }: { item: MediaItem; onOpen: () => void; onPlay: () => void }) {
   const progress = item.UserData?.PlayedPercentage ?? 0;
+  const title = item.SeriesName ?? item.Name;
   return (
-    <motion.button className="media-card" onClick={onClick} whileHover={{ y: -6, scale: 1.018 }} transition={{ type: "spring", stiffness: 380, damping: 28 }}>
-      <div className="poster"><img src={imageUrl(item)} alt="" loading="lazy" /><div className="card-overlay"><span className="card-play"><Play fill="currentColor" size={19} /></span></div>{progress > 0 && <div className="progress"><span style={{ width: `${progress}%` }} /></div>}</div>
-      <strong>{item.SeriesName ?? item.Name}</strong>
-      <span>{item.SeriesName ? item.Name : [item.ProductionYear, item.Type === "Series" ? "TV" : null].filter(Boolean).join(" · ")}</span>
-    </motion.button>
+    <motion.article className="media-card" onPointerEnter={() => warmDetailsArt(item)} onPointerDown={() => warmDetailsArt(item)} whileHover={{ y: -5, scale: 1.014 }} transition={{ type: "spring", stiffness: 350, damping: 30 }}>
+      <div className="poster">
+        <button className="poster-open" aria-label={`View details for ${title}`} onFocus={() => warmDetailsArt(item)} onClick={onOpen}>
+          <img src={imageUrl(item)} alt="" loading="lazy" />
+          <span className="card-overlay" />
+          {progress > 0 && <span className="progress"><span style={{ width: `${progress}%` }} /></span>}
+        </button>
+        <button className="card-play" aria-label={`Play ${title}`} onClick={onPlay}><Play fill="currentColor" size={19} /></button>
+      </div>
+      <button className="media-card-copy" onClick={onOpen}>
+        <strong>{title}</strong>
+        <span>{item.SeriesName ? item.Name : item.Type === "Series" ? seriesCardMeta(item) : [item.ProductionYear].filter(Boolean).join(" · ")}</span>
+      </button>
+    </motion.article>
   );
 }
 
@@ -491,8 +509,25 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
   const watched = Math.round(playTarget.UserData?.PlayedPercentage ?? 0);
   const primaryLabel = resumable ? "Resume" : item.Type === "Series" ? "Play next" : "Play";
   const genrePills = (item.Genres ?? []).slice(0, 2);
-  const studioPill = item.Studios?.[0]?.Name;
-  const countryPill = countryPresentation(item.ProductionLocations?.[0]);
+  const studioName = item.Studios?.[0]?.Name;
+  const studioPill = studioLabel(studioName);
+  const { pills: countryPillsList, overflow: countryOverflow } = countryPills(item.ProductionLocations);
+  const productionRows = productionDetails(item);
+
+  useLayoutEffect(() => {
+    const previous = {
+      overflow: document.body.style.overflow,
+      paddingRight: document.body.style.paddingRight,
+    };
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous.overflow;
+      document.body.style.paddingRight = previous.paddingRight;
+    };
+  }, []);
+
   const seasons = useMemo(() => {
     const grouped = new Map<number, MediaItem[]>();
     for (const episode of episodes) {
@@ -515,19 +550,19 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
   }, [item.Id, item.Type, userId]);
 
   return (
-    <motion.div className="details-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .24, ease: [0.22, 1, 0.36, 1] }} onMouseDown={onClose}>
-      <motion.article className={`details-card ${item.Type === "Series" ? "details-card-series" : ""}`} initial={{ y: 28, scale: .982, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} exit={{ y: 16, scale: .992, opacity: 0 }} transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }} onMouseDown={(event) => event.stopPropagation()}>
-        <div className={`details-art ${artLoaded ? "is-loaded" : ""}`}><img className="details-art-image" src={imageUrl(item, art, 1300)} alt="" onLoad={() => setArtLoaded(true)} /><span className="details-art-shade" /><button className="details-close icon-button" aria-label="Close details" onClick={onClose}><X /></button></div>
+    <motion.div className="details-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: .22 } }} transition={{ duration: .3, ease: [0.22, 1, 0.36, 1] }} onMouseDown={onClose}>
+      <motion.article className={`details-card ${item.Type === "Series" ? "details-card-series" : ""}`} initial={{ y: 16, scale: .992 }} animate={{ y: 0, scale: 1 }} exit={{ y: 10, scale: .996, transition: { duration: .22 } }} transition={{ duration: .38, ease: [0.22, 1, 0.36, 1] }} onMouseDown={(event) => event.stopPropagation()}>
+        <div className={`details-art ${artLoaded ? "is-loaded" : ""}`} style={{ backgroundImage: `url(${imageUrl(item)})` }}><img className="details-art-image" src={imageUrl(item, art, 1300)} alt="" onLoad={() => setArtLoaded(true)} /><span className="details-art-shade" /><button className="details-close icon-button" aria-label="Close details" onClick={onClose}><X /></button></div>
         <div className="details-copy">
           <span className="eyebrow">{item.Type}</span>
           <h1>{item.Name}</h1>
-          <div className="hero-meta">{item.ProductionYear && <span>{item.ProductionYear}</span>}{item.Type === "Series" && episodes.length > 0 && <span>{episodes.length} episodes</span>}{item.Type !== "Series" && minutes > 0 && <span>{minutes} min</span>}</div>
+          <div className="hero-meta">{item.Type === "Series" ? (seriesYearRange(item) && <span>{seriesYearRange(item)}</span>) : (item.ProductionYear && <span>{item.ProductionYear}</span>)}{item.Type === "Series" && item.ChildCount && item.ChildCount > 0 && <span>{item.ChildCount} {item.ChildCount === 1 ? "Season" : "Seasons"}</span>}{item.Type === "Series" && episodes.length > 0 && <span>{episodes.length} episodes</span>}{item.Type !== "Series" && minutes > 0 && <span>{minutes} min</span>}</div>
           <p>{item.Overview || "No synopsis available."}</p>
           <div className="details-actions">
             <Button className="details-play" disabled={item.Type === "Series" && !nextEpisode} onClick={() => onPlay(withSeriesMetadata(playTarget, item), false)}><Play size={18} fill="currentColor" /> {primaryLabel}</Button>
             {resumable && <Button className="details-start-over" variant="secondary" onClick={() => onPlay(withSeriesMetadata(playTarget, item), true)}><RotateCcw size={17} /> Play from beginning</Button>}
             <Button className={`details-list details-favorite ${favorite ? "active" : ""}`} variant="ghost" onClick={onToggleFavorite}><Heart size={17} fill={favorite ? "currentColor" : "none"} /><span>{favorite ? "Favorited" : "Add to favorites"}</span></Button>
-            <Button className="details-list details-add-list" variant="ghost" onClick={() => lists.length ? setListPicker(true) : onManageLists()}><ListPlus size={17} /><span>{lists.length ? "Add to list" : "Create a list"}</span></Button>
+            <Button className="details-list details-add-list" variant="ghost" onClick={() => setListPicker(true)}><ListPlus size={17} /><span>Add to list</span></Button>
             {hasWatchHistory && <Button className="details-list details-remove-history" variant="ghost" disabled={historyState === "removing"} onClick={() => { setHistoryState("removing"); void onRemoveHistory().then(() => setHistoryState("idle")).catch(() => setHistoryState("error")); }}><Trash2 size={16} /><span>{historyState === "removing" ? "Removing…" : historyState === "error" ? "Try removing again" : "Remove from history"}</span></Button>}
           </div>
           {resumable && <div className="details-progress"><div><strong>{watched}% watched</strong><span>{playTarget.Type === "Episode" ? playTarget.Name : `${Math.max(1, Math.round((playTarget.UserData?.PlaybackPositionTicks ?? 0) / 600_000_000))} min in`}</span></div><div><i style={{ width: `${Math.min(100, watched)}%` }} /></div></div>}
@@ -535,10 +570,11 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
             {item.OfficialRating && <OfficialRating value={item.OfficialRating} />}
             {item.CommunityRating && <ScorePill kind="community" value={item.CommunityRating.toFixed(1)} providerIds={item.ProviderIds} />}
             {item.CriticRating != null && <ScorePill kind="critic" value={`${Math.round(item.CriticRating)}%`} providerIds={item.ProviderIds} />}
-            {countryPill && <span className="country-pill" tabIndex={0} aria-label={`Production country: ${countryPill.label}`}><CountryFlag code={countryPill.code} /><span className="country-pill-label">{countryPill.label}</span></span>}
+            {countryPillsList.map((country, index) => <ProductionPill key={country.label} country={country} pills={countryPillsList} overflow={countryOverflow} rows={productionRows} first={index === 0} />)}
+            {countryOverflow.length > 0 && <CountryOverflowPill pills={countryPillsList} overflow={countryOverflow} rows={productionRows} />}
             {genrePills.map((genre) => <span className="details-category details-category-genre" key={genre}><span className="details-category-label">{genre}</span></span>)}
-            {studioPill && <span className="details-category details-category-context details-category-studio" title={studioPill}><span className="details-category-label">{studioPill}</span></span>}
-            {!item.OfficialRating && !item.CommunityRating && item.CriticRating == null && !genrePills.length && !studioPill && !countryPill && <span className="details-category"><span className="details-category-label">{item.Type === "Series" ? "Serialized drama" : "Feature presentation"}</span></span>}
+            {studioPill && <span className="details-category details-category-context details-category-studio" title={studioName}><span className="details-category-label">{studioPill}</span></span>}
+            {!item.OfficialRating && !item.CommunityRating && item.CriticRating == null && !genrePills.length && !studioPill && !countryPillsList.length && <span className="details-category"><span className="details-category-label">{item.Type === "Series" ? "Serialized drama" : "Feature presentation"}</span></span>}
           </div>
         </div>
         {item.Type === "Series" && (
@@ -569,6 +605,7 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
       </motion.article>
       <Modal open={listPicker} title="Add to list" onClose={() => setListPicker(false)}>
         <div className="list-picker">
+          {lists.length === 0 && <p className="list-picker-empty">No lists yet — create one to start adding titles.</p>}
           {lists.map((list) => {
             const included = list.items.some((entry) => entry.Id === item.Id);
             return <button key={list.id} className={included ? "active" : ""} onClick={() => onToggleList(list.id)}><span><ListPlus size={17} /><b title={list.name}>{list.name}</b></span>{included ? <Check size={17} /> : <Plus size={17} />}</button>;
@@ -639,21 +676,82 @@ function ScorePill({ kind, value, providerIds }: { kind: ScoreKind; value: strin
       {critic ? <TomatoMark /> : <i className="community-rating-star" aria-hidden="true">★</i>}
       {value}
       <span className="score-tooltip" id={tooltipId} role="tooltip">
-        <span className="score-tooltip-heading"><strong>{source.label}</strong><b>{value}</b></span>
+        <span className="score-tooltip-heading">
+          <strong>{critic ? "Tomatometer" : "IMDb"}</strong>
+          <b>{value}{!critic && <span className="score-denominator">/10</span>}</b>
+        </span>
         <small>{source.description}</small>
-        {source.href && <a href={source.href} target="_blank" rel="noreferrer">View title on {critic ? "Rotten Tomatoes" : "IMDb"}<ExternalLink aria-hidden="true" /></a>}
+        {source.href && <a href={source.href} target="_blank" rel="noreferrer">View title on {critic ? "Rotten Tomatoes" : "Internet Movie Database"}<ExternalLink aria-hidden="true" /></a>}
       </span>
     </span>
   );
 }
 
 function CountryFlag({ code }: { code?: string }) {
-  if (code === "US") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#fff"/><path fill="#d64b55" d="M0 0h28v2H0zm0 4h28v2H0zm0 4h28v2H0zm0 4h28v2H0zm0 4h28v2H0z"/><path fill="#365899" d="M0 0h12v10H0z"/><path fill="#fff" d="m2 2 .4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2zm4 0 .4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2zm4 0 .4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2zM4 6l.4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2zm4 0 .4 1.1h1.2l-1 .7.4 1.1-1-.7-1 .7.4-1.1-1-.7h1.2z"/></svg>;
-  if (code === "CA") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#fff"/><path fill="#d52b3f" d="M0 0h6v20H0zm22 0h6v20h-6zM14 3l1.2 3 2.4-1.2-.7 2.8 2 .9-3.4 2.7.8 2.2-2.3-.5-2.3.5.8-2.2-3.4-2.7 2-.9-.7-2.8L12.8 6z"/></svg>;
-  if (code === "GB") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#24468f"/><path stroke="#fff" strokeWidth="4" d="m0 0 28 20M28 0 0 20"/><path stroke="#d53b4b" strokeWidth="1.8" d="m0 0 28 20M28 0 0 20"/><path fill="#fff" d="M11 0h6v20h-6zM0 7h28v6H0z"/><path fill="#d53b4b" d="M12 0h4v20h-4zM0 8h28v4H0z"/></svg>;
-  if (code === "JP") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#fff"/><circle cx="14" cy="10" r="5" fill="#c82f45"/></svg>;
-  if (code === "CN" || code === "HK") return <svg className="country-flag" viewBox="0 0 28 20" aria-hidden="true"><rect width="28" height="20" rx="2" fill="#d62f3e"/><path fill="#ffd34e" d="m7 4 1 2h2l-1.6 1.3L9 9.5 7 8.2 5 9.5l.6-2.2L4 6h2z"/></svg>;
+  const path = countryFlagPath(code);
+  if (path) return <img className="country-flag" src={path} alt="" aria-hidden="true" />;
   return <span className="country-flag country-flag-generic" aria-hidden="true"><Flag size={15} /></span>;
+}
+
+function ProductionPill({ country, pills, overflow, rows, first }: { country: { code?: string; label: string }; pills: Array<{ code?: string; label: string }>; overflow: Array<{ code?: string; label: string }>; rows: Array<{ label: string; value: string }>; first: boolean }) {
+  const tooltipId = useId();
+  // Every pill's card lists all countries — the visible three plus any overflow —
+  // so a >3-country title never hides a co-producer, whichever pill you hover.
+  const allCountries = [...pills, ...overflow];
+  // The card repeats the joined country line from `rows` for the visible pills, but
+  // drop it: the dedicated country list below is the fuller, flag-tagged version.
+  const nonCountryRows = rows.filter((row) => !row.label.startsWith("Countr"));
+  return (
+    <span className={`country-pill${first ? " country-pill-lead" : ""}`} tabIndex={0} aria-label={`Production details for ${country.label}`} aria-describedby={tooltipId}>
+      <CountryFlag code={country.code} />
+      <span className="country-pill-label">{country.label}</span>
+      <span className="production-card" id={tooltipId} role="tooltip">
+        <strong>Production details</strong>
+        <span className="production-card-row">
+          <small>{allCountries.length === 1 ? "Country of production" : "Countries of production"}</small>
+          <span className="production-card-countries">
+            {allCountries.map((entry) => (
+              <span className="production-card-country" key={entry.label}>
+                <CountryFlag code={entry.code} />
+                <b>{entry.label}</b>
+              </span>
+            ))}
+          </span>
+        </span>
+        {nonCountryRows.map((row) => <span className="production-card-row" key={row.label}><small>{row.label}</small><b>{row.value}</b></span>)}
+      </span>
+    </span>
+  );
+}
+
+// The "+N" pill collapses production countries beyond the first two. It hovers to
+// the same full-detail card (every country, flag-tagged, plus studio/release), so
+// the co-producers are one hover away and nothing is dropped from the row.
+function CountryOverflowPill({ pills, overflow, rows }: { pills: Array<{ code?: string; label: string }>; overflow: Array<{ code?: string; label: string }>; rows: Array<{ label: string; value: string }> }) {
+  const tooltipId = useId();
+  const allCountries = [...pills, ...overflow];
+  const nonCountryRows = rows.filter((row) => !row.label.startsWith("Countr"));
+  const overflowLabels = overflow.map((entry) => entry.label).join(", ");
+  return (
+    <span className="country-pill country-pill-overflow" tabIndex={0} aria-label={`${overflow.length} more production ${overflow.length === 1 ? "country" : "countries"}: ${overflowLabels}`} aria-describedby={tooltipId}>
+      <span className="country-pill-label">+{overflow.length}</span>
+      <span className="production-card" id={tooltipId} role="tooltip">
+        <strong>Production details</strong>
+        <span className="production-card-row">
+          <small>{allCountries.length === 1 ? "Country of production" : "Countries of production"}</small>
+          <span className="production-card-countries">
+            {allCountries.map((entry) => (
+              <span className="production-card-country" key={entry.label}>
+                <CountryFlag code={entry.code} />
+                <b>{entry.label}</b>
+              </span>
+            ))}
+          </span>
+        </span>
+        {nonCountryRows.map((row) => <span className="production-card-row" key={row.label}><small>{row.label}</small><b>{row.value}</b></span>)}
+      </span>
+    </span>
+  );
 }
 
 function TomatoMark() {
@@ -670,6 +768,7 @@ function OfficialRating({ value }: { value: string }) {
   const tooltipId = useId();
   const letterClassName = badge.scheme === "us-film" && badge.label === "G"
     ? " rating-badge-letter-g"
+    : badge.scheme === "us-film" && /^(PG-13|NC-17)$/.test(badge.label) ? " rating-badge-letter-long"
     : badge.scheme === "ca" && badge.label === "R" ? " rating-badge-letter-r"
     : badge.scheme === "ca" && badge.label === "PG" ? " rating-badge-letter-pg" : "";
   const badgeClassName = `rating-badge rating-badge-${badge.scheme} rating-badge-${badge.shape} rating-badge-${badge.tone}${letterClassName}`;
@@ -727,3 +826,6 @@ function readLists(): MediaList[] {
     return [];
   }
 }
+
+
+

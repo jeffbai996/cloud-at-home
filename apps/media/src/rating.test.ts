@@ -11,7 +11,7 @@ describe("ratingBadge", () => {
     ["CA-R", { label: "R", scheme: "ca", shape: "circle", tone: "red" }],
     ["CA-A", { label: "A", scheme: "ca", shape: "circle", tone: "red" }],
     ["TV-PG", { label: "TV-PG", scheme: "us-tv", shape: "plaque", tone: "mono" }],
-    ["PG-13", { label: "PG-13", scheme: "us-film", shape: "plaque", tone: "mono" }],
+    ["PG-13", { label: "PG-13", scheme: "us-film", shape: "plaque", tone: "purple" }],
   ] as const)("maps %s to its visual badge", (rating, expected) => {
     expect(ratingBadge(rating)).toMatchObject(expected);
   });
@@ -41,7 +41,7 @@ describe("ratingBadge", () => {
     ["CA-R", "Restricted", "British Columbia Film Classification Office", "under 18 years of age are not permitted"],
     ["CA-A", "Adult", "British Columbia Film Classification Office", "under 18 years of age are not permitted"],
     ["TV-MA", "Mature Audience Only", "TV Parental Guidelines", "unsuitable for children under 17"],
-    ["PG-13", "Parents Strongly Cautioned", "Motion Picture Association of America", "inappropriate for children under 13"],
+    ["PG-13", "Parents Strongly Cautioned", "Motion Picture Association", "inappropriate for children under 13"],
   ])("includes official classification guidance for %s", (rating, name, authority, copy) => {
     expect(ratingBadge(rating)).toMatchObject({ name, authority });
     expect(ratingBadge(rating).description).toContain(copy);

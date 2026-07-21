@@ -16,16 +16,14 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { Button, Modal } from "@cloud-at-home/ui";
-import { createStreamTicket, getPlaybackInfo, getSeriesEpisodes, imageUrl, loadSubtitleTrack, reportPlayback, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
-import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionLineHeight, captionPrefsVersion, captionVerticalOffset, formatPlaybackStats, mediaYearLabel, migrateCaptionDefaults, pauseCinemaDelays, playbackStartPosition, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, trickplayFrame, usesNativeVideoFullscreen, type TrickplayInfo } from "./playback";
+import { createStreamTicket, getPlaybackInfo, getSeriesEpisodes, imageUrl, reportPlayback, subtitleTrackUrl, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
+import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionLineHeight, captionPrefsVersion, captionVerticalOffset, formatPlaybackStats, fullscreenStrategy, mediaYearLabel, migrateCaptionDefaults, pauseCinemaDelays, pauseSynopsisDurationSeconds, playbackStartPosition, playerKeyboardAction, playerTitleOwners, prefersViewportFullscreen, shouldArmTitleTimer, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, titleDisplayDurationMs, trickplayFrame, type TrickplayInfo } from "./playback";
 
 type SafariVideo = HTMLVideoElement & {
   webkitShowPlaybackTargetPicker?: () => void;
-  webkitEnterFullscreen?: () => void;
   webkitCurrentPlaybackTargetIsWireless?: boolean;
   webkitPresentationMode?: "inline" | "fullscreen" | "picture-in-picture";
   webkitSupportsPresentationMode?: (mode: string) => boolean;
@@ -42,6 +40,8 @@ type SafariFullscreenDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void;
 };
 
+type AudioWindow = Window & { webkitAudioContext?: typeof AudioContext };
+
 type CaptionPrefs = {
   fontSize: number;
   fontWeight: number;
@@ -53,9 +53,9 @@ type CaptionPrefs = {
   backgroundOpacity: number;
 };
 
-const defaultCaptions: CaptionPrefs = { fontSize: 85, fontWeight: 600, lineHeight: 1.45, letterSpacing: 0, phonePortraitOffset: 25, portraitOffset: 12, landscapeOffset: 8, backgroundOpacity: 0.5 };
+const defaultCaptions: CaptionPrefs = { fontSize: 85, fontWeight: 600, lineHeight: 1.52, letterSpacing: 0, phonePortraitOffset: 25, portraitOffset: 12, landscapeOffset: 8, backgroundOpacity: 0.5 };
 const playbackPrefsKey = "cloud-media-playback";
-
+const pauseTitleHandoffMs = 500;
 type PlaybackPrefs = { muted: boolean; volume: number; rate?: number; fit?: "contain" | "cover"; subtitleLanguage?: string; subtitlesOff?: boolean };
 
 function loadPlaybackPrefs(): PlaybackPrefs {
@@ -67,27 +67,44 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const reduceMotion = useReducedMotion();
   const shellRef = useRef<SafariFullscreenElement>(null);
   const videoRef = useRef<SafariVideo>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const audioGainRef = useRef<GainNode | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const subtitleTrackRef = useRef<HTMLTrackElement | null>(null);
   const subtitleCueListenerRef = useRef<(() => void) | null>(null);
-  const subtitleBlobUrlRef = useRef<string | null>(null);
-  const subtitleLoadRef = useRef(0);
   const nativeFullscreenRef = useRef(false);
+  const fullscreenIntentRef = useRef(false);
+  const toggleFullscreenRef = useRef<() => void>(() => undefined);
+  const initialPlayPendingRef = useRef(true);
   const lastReport = useRef(0);
   const positionRef = useRef(fromBeginning ? 0 : (item.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000);
   const stoppedRef = useRef(false);
   const reportQueueRef = useRef<Promise<void>>(Promise.resolve());
   const transportTimerRef = useRef<number | null>(null);
   const controlsTimerRef = useRef<number | null>(null);
+  const titleTimerRef = useRef<number | null>(null);
   const seekingRef = useRef(false);
   const seekTargetRef = useRef<number | null>(null);
+  // Live-scrub: while dragging we coalesce seeks to one per animation frame so
+  // an HLS transcode is not hammered with a new seek on every input event.
+  const scrubRafRef = useRef<number | null>(null);
+  const scrubPendingRef = useRef<number | null>(null);
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [playing, setPlaying] = useState(false);
   const playbackPrefs = useRef(loadPlaybackPrefs());
   const [muted, setMuted] = useState(playbackPrefs.current.muted);
+  // Native media volume is capped at 100%; boosts are re-enabled by an explicit
+  // user gesture each session so browsers never suspend the audio graph silently.
+  const initialVolume = Math.min(1, Math.max(0, playbackPrefs.current.volume));
+  const volumeRef = useRef(initialVolume);
+  const [volume, setVolume] = useState(initialVolume);
   const [position, setPosition] = useState(fromBeginning ? 0 : (item.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000);
   const [duration, setDuration] = useState((item.RunTimeTicks ?? 0) / 10_000_000);
   const [controls, setControls] = useState(true);
+  // The top title/year block lingers a beat after the rest of the chrome fades,
+  // then fades on its own — so the picture clears in two calm stages, not one.
+  const [titleLingering, setTitleLingering] = useState(true);
   const [transportHover, setTransportHover] = useState(false);
   const [settings, setSettings] = useState<"captions" | "playback" | "episodes" | null>(null);
   const [seriesEpisodes, setSeriesEpisodes] = useState<MediaItem[]>([]);
@@ -114,6 +131,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const [playbackRate, setPlaybackRate] = useState(playbackPrefs.current.rate ?? 1);
   const [videoFit, setVideoFit] = useState<"contain" | "cover">(playbackPrefs.current.fit ?? "contain");
   const [pauseCinema, setPauseCinema] = useState(false);
+  const [pauseTitleHandoff, setPauseTitleHandoff] = useState(false);
   const [pauseFrame, setPauseFrame] = useState("");
   const [subtitleIndex, setSubtitleIndex] = useState<number | null>(null);
   const [cue, setCue] = useState("");
@@ -134,25 +152,44 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const pauseTitleLead = pauseTitleBreak > 0 ? pauseTitle.slice(0, pauseTitleBreak + 1) : "";
   const pauseTitleTail = pauseTitleBreak > 0 ? pauseTitle.slice(pauseTitleBreak + 1) : pauseTitle;
   const pauseDelays = pauseCinemaDelays(Boolean(item.SeriesName));
+  const titleOwners = playerTitleOwners(pauseCinema, titleLingering, pauseTitleHandoff);
   const captionOffset = smartphoneLandscape ? captions.landscapeOffset : phonePortrait ? captions.phonePortraitOffset : captions.portraitOffset;
   const subtitles = useMemo(() => source?.MediaStreams?.filter((stream) => stream.Type === "Subtitle") ?? [], [source]);
   const videoStream = source?.MediaStreams?.find((stream) => stream.Type === "Video");
   const audioStream = source?.MediaStreams?.find((stream) => stream.Type === "Audio");
   const video = videoRef.current;
+  const playerBounds = shellRef.current?.getBoundingClientRect();
   const quality = video?.getVideoPlaybackQuality?.();
+  const hls = hlsRef.current;
+  const hlsLevel = hls && hls.currentLevel >= 0 ? hls.levels[hls.currentLevel] : undefined;
   const bufferedSeconds = video?.buffered.length
     ? Math.max(0, video.buffered.end(video.buffered.length - 1) - video.currentTime)
     : 0;
   const playbackStats = formatPlaybackStats({
     width: video?.videoWidth || videoStream?.Width,
     height: video?.videoHeight || videoStream?.Height,
+    viewportWidth: playerBounds ? Math.round(playerBounds.width) : undefined,
+    viewportHeight: playerBounds ? Math.round(playerBounds.height) : undefined,
     mode: source?.TranscodingUrl ? "Transcoding" : "Direct play",
     container: source?.Container,
     videoCodec: videoStream?.Codec,
+    videoProfile: videoStream?.Profile,
+    bitDepth: videoStream?.BitDepth,
+    frameRate: videoStream?.RealFrameRate ?? videoStream?.AverageFrameRate,
+    videoBitrate: videoStream?.BitRate,
     audioCodec: audioStream?.Codec,
+    audioChannels: audioStream?.Channels,
+    sampleRate: audioStream?.SampleRate,
+    audioBitrate: audioStream?.BitRate,
+    position: video?.currentTime,
+    duration: video?.duration,
     bufferedSeconds,
     droppedFrames: quality?.droppedVideoFrames,
     totalFrames: quality?.totalVideoFrames,
+    bandwidth: hls?.bandwidthEstimate,
+    hlsLevel: hlsLevel ? `${hlsLevel.width} × ${hlsLevel.height}${hlsLevel.bitrate ? ` · ${(hlsLevel.bitrate / 1_000_000).toFixed(1)} Mbps` : ""}` : undefined,
+    readyState: video?.readyState,
+    networkState: video?.networkState,
     rate: playbackRate,
   });
   useEffect(() => {
@@ -169,6 +206,9 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   useEffect(() => () => {
     if (transportTimerRef.current !== null) window.clearTimeout(transportTimerRef.current);
     if (controlsTimerRef.current !== null) window.clearTimeout(controlsTimerRef.current);
+    if (titleTimerRef.current !== null) window.clearTimeout(titleTimerRef.current);
+    if (scrubRafRef.current !== null) window.cancelAnimationFrame(scrubRafRef.current);
+    if (audioContextRef.current) void audioContextRef.current.close().catch(() => undefined);
   }, []);
   useEffect(() => {
     if (!item.SeriesId) { setSeriesEpisodes([]); return; }
@@ -217,16 +257,68 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   }, [payload]);
 
   useEffect(() => {
-    getPlaybackInfo(item.Id, session.user.id).then(setInfo).catch((reason) => setError(String(reason.message ?? reason)));
+    const supportsHevc = Boolean(videoRef.current?.canPlayType('video/mp4; codecs="hvc1"'));
+    getPlaybackInfo(item.Id, session.user.id, supportsHevc).then(setInfo).catch((reason) => setError(String(reason.message ?? reason)));
   }, [item.Id, session.user.id]);
 
   useEffect(() => {
     if (!source || !videoRef.current) return;
     const video = videoRef.current;
     let cancelled = false;
+    let initialPlayAttempts = 0;
+    let retryTimer: number | null = null;
+    let waitingForCanPlay = false;
+    const maxInitialPlayAttempts = 4;
+    const paintPausedFrame = () => {
+      if (!cancelled && video.paused) setPauseFrame(captureVideoFrame(video));
+    };
+    const markInitialPlayStarted = () => { initialPlayPendingRef.current = false; };
+    const retryWhenPlayable = () => {
+      waitingForCanPlay = false;
+      scheduleInitialPlayRetry(false);
+    };
+    const scheduleInitialPlayRetry = (waitForCanPlay: boolean) => {
+      if (cancelled || !initialPlayPendingRef.current || !video.paused || retryTimer !== null) return;
+      if (initialPlayAttempts >= maxInitialPlayAttempts) {
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) paintPausedFrame();
+        else video.addEventListener("loadeddata", paintPausedFrame, { once: true });
+        return;
+      }
+      if (waitForCanPlay && video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+        if (!waitingForCanPlay) {
+          waitingForCanPlay = true;
+          video.addEventListener("canplay", retryWhenPlayable, { once: true });
+        }
+        return;
+      }
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null;
+        startPlayback();
+      }, 0);
+    };
+    const startPlayback = () => {
+      if (cancelled) return;
+      initialPlayAttempts += 1;
+      void startVideoPlayback(video).catch(() => {
+        // Safari can abort the first play while a ticketed source or resume seek
+        // is still settling. A later `play` event is not success: WebKit can
+        // emit play -> pause without ever advancing a frame. Keep the original
+        // command pending until `playing`, and recover both rejected plays and
+        // setup-time pauses without touching deliberate pauses after startup.
+        scheduleInitialPlayRetry(true);
+      });
+    };
+    const recoverInterruptedInitialPlay = () => scheduleInitialPlayRetry(false);
+    const startAfterResume = () => startPlayback();
     const applyResume = () => {
       const target = playbackStartPosition(position, video.duration, fromBeginning);
-      if (target > 0) { video.currentTime = target; positionRef.current = target; }
+      if (target > 0 && Math.abs(video.currentTime - target) > .05) {
+        video.addEventListener("seeked", startAfterResume, { once: true });
+        video.currentTime = target;
+        positionRef.current = target;
+        return;
+      }
+      startPlayback();
     };
     void createStreamTicket(item.Id).then((ticket) => {
       if (cancelled) return;
@@ -246,9 +338,17 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       else video.addEventListener("loadedmetadata", applyResume, { once: true });
       void enqueueReport("start");
     }).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not create playback session"));
+    video.addEventListener("playing", markInitialPlayStarted);
+    video.addEventListener("pause", recoverInterruptedInitialPlay);
     return () => {
       cancelled = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
       video.removeEventListener("loadedmetadata", applyResume);
+      video.removeEventListener("loadeddata", paintPausedFrame);
+      video.removeEventListener("canplay", retryWhenPlayable);
+      video.removeEventListener("seeked", startAfterResume);
+      video.removeEventListener("playing", markInitialPlayStarted);
+      video.removeEventListener("pause", recoverInterruptedInitialPlay);
       if (!stoppedRef.current) {
         stoppedRef.current = true;
         void enqueueReport("stop", true);
@@ -283,6 +383,8 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   useEffect(() => {
     const enterPictureInPicture = () => {
       const video = videoRef.current;
+      const fullscreenDocument = document as SafariFullscreenDocument;
+      if (fullscreenIntentRef.current || document.fullscreenElement || fullscreenDocument.webkitFullscreenElement) return;
       if (!video || !shouldAutoPictureInPicture(video.paused, video.ended, video.readyState)) return;
       try {
         if (video.webkitSupportsPresentationMode?.("picture-in-picture")) {
@@ -309,18 +411,68 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (settings) return;
+      // Let the user type into text fields unhindered. Player sliders are not
+      // typing surfaces: a focused seek/volume range must not disable every
+      // shortcut for the rest of the session.
+      const target = event.target as HTMLElement | null;
+      const playerRange = target instanceof HTMLInputElement
+        && target.type === "range"
+        && Boolean(target.closest(".player-shell"));
+      if (target && !playerRange && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       const video = videoRef.current;
       if (!video) return;
-      if (["ArrowLeft", "ArrowRight", " ", "k", "j", "l", "f", "m"].includes(event.key.toLowerCase())) event.preventDefault();
-      if (event.key === "ArrowLeft" || event.key.toLowerCase() === "j") video.currentTime = Math.max(0, video.currentTime - 10);
-      if (event.key === "ArrowRight" || event.key.toLowerCase() === "l") video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
-      if (event.key === " " || event.key.toLowerCase() === "k") video.paused ? void video.play() : video.pause();
-      if (event.key.toLowerCase() === "f") toggleFullscreen();
-      if (event.key.toLowerCase() === "m") video.muted = !video.muted;
+      const key = event.key;
+      const shortcut = playerKeyboardAction(key, event.code);
+      const captionsActive = subtitleIndex !== null;
+      const ownsDigit = /^[0-9]$/.test(key);
+      // Only claim -/+/= when there is a caption to resize; otherwise leave them
+      // to the browser so they are not silently eaten to no effect.
+      const ownsFontKey = captionsActive && (key === "-" || key === "+" || key === "=" || key === "_");
+      const isOwned = shortcut !== null || ownsDigit || ownsFontKey;
+      if (isOwned) event.preventDefault();
+      if (shortcut === "toggle" && event.repeat) return;
+      // Any handled shortcut wakes the chrome, then lets it auto-hide again.
+      if (isOwned) {
+        setControls(true);
+        setTitleLingering(true);
+        if (controlsTimerRef.current !== null) window.clearTimeout(controlsTimerRef.current);
+        if (titleTimerRef.current !== null) window.clearTimeout(titleTimerRef.current);
+        controlsTimerRef.current = window.setTimeout(() => setControls(false), 2_800);
+        // While paused, pause cinema owns the title handoff. An independent
+        // timer can clear the corner title several seconds too early.
+        if (!video.paused) titleTimerRef.current = window.setTimeout(() => setTitleLingering(false), titleDisplayDurationMs);
+      }
+
+      if (shortcut === "seek-back") video.currentTime = Math.max(0, video.currentTime - 10);
+      else if (shortcut === "seek-forward") video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
+      else if (shortcut === "toggle") video.paused ? void startVideoPlayback(video) : pauseVideoPlayback(video);
+      else if (shortcut === "fullscreen") toggleFullscreenRef.current();
+      else if (shortcut === "mute") video.muted = !video.muted;
+      else if (shortcut === "volume-up") changeVolume(volumeRef.current + 0.05);
+      else if (shortcut === "volume-down") changeVolume(volumeRef.current - 0.05);
+      else if (shortcut === "captions") {
+        if (!subtitles.length) return;
+        if (captionsActive) void chooseSubtitle(null);
+        else {
+          const preferred = subtitles.find((stream) => stream.Language === playbackPrefs.current.subtitleLanguage);
+          void chooseSubtitle((preferred ?? subtitles[0]).Index);
+        }
+      }
+      else if (ownsFontKey) {
+        const step = (key === "+" || key === "=") ? 5 : -5;
+        setCaptions((current) => ({ ...current, fontSize: captionFontSize(current.fontSize + step) }));
+      }
+      else if (ownsDigit) {
+        const seconds = (video.duration || duration) * (Number(key) / 10);
+        if (Number.isFinite(seconds)) video.currentTime = seconds;
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [settings]);
+    // Capture before WebKit's native media/range handlers consume Space or an
+    // arrow key. This matters for hardware keyboards attached to an iPad.
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [settings, subtitleIndex, subtitles, duration]);
 
   useEffect(() => {
     localStorage.setItem("cloud-media-captions", JSON.stringify({ ...captions, version: captionPrefsVersion }));
@@ -348,9 +500,9 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     video.volume = Math.min(1, Math.max(0, playbackPrefs.current.volume));
     video.muted = playbackPrefs.current.muted;
     video.playbackRate = playbackPrefs.current.rate ?? 1;
-    if (playbackPrefs.current.subtitlesOff) return;
+    if (playbackPrefs.current.subtitlesOff || !subtitles.length) return;
     const preferred = subtitles.find((stream) => stream.Language === playbackPrefs.current.subtitleLanguage);
-    if (preferred) chooseSubtitle(preferred.Index);
+    chooseSubtitle((preferred ?? subtitles[0]).Index);
     // Restore once for each media source after its stream list arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source?.Id, subtitles]);
@@ -363,10 +515,31 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   }, [playbackRate, videoFit]);
 
   useEffect(() => {
-    if (playing) { setPauseCinema(false); return; }
-    const timer = window.setTimeout(() => { setPauseCinema(true); setControls(false); }, 10_000);
-    return () => window.clearTimeout(timer);
-  }, [playing, position]);
+    if (playing) {
+      setPauseCinema(false);
+      setPauseTitleHandoff(false);
+      setTitleLingering(true);
+      if (titleTimerRef.current !== null) window.clearTimeout(titleTimerRef.current);
+      titleTimerRef.current = window.setTimeout(() => setTitleLingering(false), titleDisplayDurationMs);
+      return;
+    }
+    if (titleTimerRef.current !== null) window.clearTimeout(titleTimerRef.current);
+    setTitleLingering(true);
+    let handoffTimer: number | null = null;
+    const timer = window.setTimeout(() => {
+      setPauseCinema(true);
+      setPauseTitleHandoff(true);
+      setControls(false);
+      handoffTimer = window.setTimeout(() => {
+        setPauseTitleHandoff(false);
+        setTitleLingering(false);
+      }, pauseTitleHandoffMs);
+    }, 10_000);
+    return () => {
+      window.clearTimeout(timer);
+      if (handoffTimer !== null) window.clearTimeout(handoffTimer);
+    };
+  }, [playing]);
 
   const syncSubtitleCue = useCallback(() => {
     if (nativeFullscreenRef.current) { setCue(""); return; }
@@ -383,8 +556,6 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     }
     subtitleCueListenerRef.current = null;
     subtitleTrackRef.current = null;
-    if (subtitleBlobUrlRef.current) URL.revokeObjectURL(subtitleBlobUrlRef.current);
-    subtitleBlobUrlRef.current = null;
     setCue("");
   }, []);
 
@@ -448,24 +619,34 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       if (track && subtitleIndex !== null) track.mode = active ? "showing" : "hidden";
       if (active) setCue(""); else syncSubtitleCue();
     };
-    const begin = () => setNativeFullscreen(true);
-    const end = () => setNativeFullscreen(false);
-    const standardChange = () => setNativeFullscreen(document.fullscreenElement === video);
-    const presentationChange = () => setNativeFullscreen(video.webkitPresentationMode === "fullscreen" || video.webkitPresentationMode === "picture-in-picture");
+    const begin = () => { fullscreenIntentRef.current = true; setNativeFullscreen(true); };
+    const end = () => { fullscreenIntentRef.current = false; setNativeFullscreen(false); };
+    const standardChange = () => {
+      const fullscreenDocument = document as SafariFullscreenDocument;
+      const active = Boolean(document.fullscreenElement || fullscreenDocument.webkitFullscreenElement);
+      fullscreenIntentRef.current = active;
+      if (!active) setViewportFullscreen(false);
+      setNativeFullscreen(document.fullscreenElement === video);
+    };
+    const presentationChange = () => {
+      fullscreenIntentRef.current = video.webkitPresentationMode === "fullscreen";
+      setNativeFullscreen(video.webkitPresentationMode === "fullscreen" || video.webkitPresentationMode === "picture-in-picture");
+    };
     video.addEventListener("webkitbeginfullscreen", begin);
     video.addEventListener("webkitendfullscreen", end);
     video.addEventListener("webkitpresentationmodechanged", presentationChange);
     document.addEventListener("fullscreenchange", standardChange);
+    document.addEventListener("webkitfullscreenchange", standardChange);
     return () => {
       video.removeEventListener("webkitbeginfullscreen", begin);
       video.removeEventListener("webkitendfullscreen", end);
       video.removeEventListener("webkitpresentationmodechanged", presentationChange);
       document.removeEventListener("fullscreenchange", standardChange);
+      document.removeEventListener("webkitfullscreenchange", standardChange);
     };
   }, [subtitleIndex, syncSubtitleCue]);
 
-  async function chooseSubtitle(index: number | null) {
-    const loadId = ++subtitleLoadRef.current;
+  function chooseSubtitle(index: number | null) {
     setSubtitleIndex(index);
     const selected = subtitles.find((entry) => entry.Index === index);
     playbackPrefs.current = {
@@ -485,14 +666,6 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     if (index === null) { setError(""); return; }
     if (!selected) { setError("Could not load subtitle track."); return; }
     setError("");
-    let trackUrl: string;
-    try { trackUrl = await loadSubtitleTrack(item.Id, source.Id, index); }
-    catch (reason) {
-      if (loadId === subtitleLoadRef.current) setError(`Could not load subtitle track. ${reason instanceof Error ? reason.message : "Please try again."}`);
-      return;
-    }
-    if (loadId !== subtitleLoadRef.current) { URL.revokeObjectURL(trackUrl); return; }
-    subtitleBlobUrlRef.current = trackUrl;
     const track = document.createElement("track");
     track.kind = "subtitles";
     track.label = subtitleTrackLabel(selected);
@@ -507,7 +680,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       setError("");
     }, { once: true });
     track.addEventListener("error", () => setError("Could not load subtitle track."), { once: true });
-    track.src = trackUrl;
+    track.src = subtitleTrackUrl(item.Id, source.Id, index);
     track.track.mode = "hidden";
     subtitleTrackRef.current = track;
     video.appendChild(track);
@@ -523,7 +696,24 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     setSeekPreview({ time: fraction * (duration || 0), left });
   }
 
+  // Apply the newest dragged position to the video, at most once per frame.
+  function flushScrub() {
+    scrubRafRef.current = null;
+    const video = videoRef.current;
+    const target = scrubPendingRef.current;
+    if (video && target !== null && Math.abs(video.currentTime - target) > .05) {
+      video.currentTime = target;
+    }
+  }
+
+  function scheduleScrub(target: number) {
+    scrubPendingRef.current = target;
+    if (scrubRafRef.current === null) scrubRafRef.current = window.requestAnimationFrame(flushScrub);
+  }
+
   function commitSeek(target = seekTargetRef.current) {
+    if (scrubRafRef.current !== null) { window.cancelAnimationFrame(scrubRafRef.current); scrubRafRef.current = null; }
+    scrubPendingRef.current = null;
     const video = videoRef.current;
     if (video && target !== null) {
       // Pointer-up can be followed by one final native range change event.
@@ -539,8 +729,10 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   function changeSeekTarget(target: number) {
     seekTargetRef.current = target;
     setSeekTarget(target);
-    // Keyboard changes and track clicks do not begin a pointer drag.
-    if (!seekingRef.current) commitSeek(target);
+    // During a pointer drag, scrub the video live (rAF-throttled) so the frame
+    // tracks the thumb. Keyboard/track-click changes commit immediately.
+    if (seekingRef.current) scheduleScrub(target);
+    else commitSeek(target);
   }
 
   function showAirPlayPicker() {
@@ -555,58 +747,133 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     setNotice(airPlayUnavailableMessage(navigator.userAgent));
   }
 
+  function ensureVolumeGain(): GainNode | null {
+    if (audioGainRef.current) {
+      if (audioContextRef.current?.state === "suspended") void audioContextRef.current.resume();
+      return audioGainRef.current;
+    }
+    const video = videoRef.current;
+    const AudioContextConstructor = window.AudioContext ?? (window as AudioWindow).webkitAudioContext;
+    if (!video || !AudioContextConstructor) return null;
+    try {
+      const context = new AudioContextConstructor();
+      const source = context.createMediaElementSource(video);
+      const gain = context.createGain();
+      const compressor = context.createDynamicsCompressor();
+      compressor.threshold.value = -6;
+      compressor.knee.value = 12;
+      compressor.ratio.value = 4;
+      compressor.attack.value = .003;
+      compressor.release.value = .25;
+      source.connect(gain).connect(compressor).connect(context.destination);
+      audioContextRef.current = context;
+      audioSourceRef.current = source;
+      audioGainRef.current = gain;
+      if (context.state === "suspended") void context.resume();
+      return gain;
+    } catch {
+      return null;
+    }
+  }
+
+  function changeVolume(nextVolume: number) {
+    const video = videoRef.current;
+    if (!video) return;
+    let next = Math.min(2, Math.max(0, nextVolume));
+    const gain = next > 1 ? ensureVolumeGain() : audioGainRef.current;
+    if (next > 1 && !gain) {
+      next = 1;
+      setNotice("Volume boost is unavailable in this browser.");
+    }
+    if (gain && audioContextRef.current) gain.gain.setTargetAtTime(Math.max(1, next), audioContextRef.current.currentTime, .015);
+    video.volume = Math.min(1, next);
+    video.muted = next === 0;
+    volumeRef.current = next;
+    setVolume(next);
+    playbackPrefs.current = { ...playbackPrefs.current, muted: next === 0, volume: next };
+    localStorage.setItem(playbackPrefsKey, JSON.stringify(playbackPrefs.current));
+  }
+
+  function restorePlaybackAudio(video: HTMLVideoElement) {
+    const prefs = playbackPrefs.current;
+    video.volume = Math.min(1, Math.max(0, prefs.volume));
+    video.muted = prefs.muted || prefs.volume <= 0;
+    if (audioContextRef.current?.state === "suspended") void audioContextRef.current.resume().catch(() => undefined);
+  }
+
+  function startVideoPlayback(video = videoRef.current): Promise<void> {
+    if (!video) return Promise.resolve();
+    // Source attachment, resume seeks, backgrounding, and Safari can each
+    // suspend a previously valid output path. Every play intent restores it.
+    restorePlaybackAudio(video);
+    return video.play();
+  }
+
+  function pauseVideoPlayback(video = videoRef.current) {
+    if (!video) return;
+    // A pause during source setup normally means WebKit interrupted startup,
+    // but keyboard/click pauses are explicit user intent and must never be
+    // "recovered" into playback by the startup retry loop.
+    initialPlayPendingRef.current = false;
+    video.pause();
+  }
+
   function toggleFullscreen() {
     const fullscreenDocument = document as SafariFullscreenDocument;
     if (document.fullscreenElement || fullscreenDocument.webkitFullscreenElement) {
+      fullscreenIntentRef.current = false;
+      setViewportFullscreen(false);
       const exit = document.exitFullscreen?.bind(document) ?? fullscreenDocument.webkitExitFullscreen?.bind(fullscreenDocument);
       const result = exit?.();
       if (result instanceof Promise) void result.catch(() => undefined);
       return;
     }
-    if (viewportFullscreen) { setViewportFullscreen(false); return; }
-    if (usesNativeVideoFullscreen(navigator.userAgent)) {
-      const video = videoRef.current;
-      if (typeof video?.webkitEnterFullscreen === "function") {
-        try {
-          const track = subtitleTrackRef.current?.track;
-          nativeFullscreenRef.current = true;
-          flushSync(() => setCue(""));
-          if (track && subtitleIndex !== null) track.mode = "showing";
-          video.webkitEnterFullscreen();
-        }
-        catch {
-          nativeFullscreenRef.current = false;
-          const track = subtitleTrackRef.current?.track;
-          if (track && subtitleIndex !== null) track.mode = "hidden";
-          syncSubtitleCue();
-          setViewportFullscreen(true);
-          window.scrollTo(0, 0);
-        }
-      } else {
-        setViewportFullscreen(true);
-        window.scrollTo(0, 0);
+    if (viewportFullscreen) { fullscreenIntentRef.current = false; setViewportFullscreen(false); return; }
+    const shell = shellRef.current;
+    const standardRequest = shell?.requestFullscreen?.bind(shell);
+    const legacyRequest = shell?.webkitRequestFullscreen?.bind(shell);
+    const forbidLegacyFullscreen = prefersViewportFullscreen(
+      navigator.maxTouchPoints,
+      window.matchMedia("(pointer: coarse)").matches,
+      navigator.userAgent,
+    );
+    const strategy = fullscreenStrategy(Boolean(standardRequest), Boolean(legacyRequest), forbidLegacyFullscreen);
+    const request = strategy === "standard-shell" ? standardRequest : strategy === "legacy-shell" ? legacyRequest : undefined;
+    fullscreenIntentRef.current = true;
+    const useViewport = () => {
+      if (!fullscreenIntentRef.current) return;
+      setViewportFullscreen(true);
+      window.scrollTo(0, 0);
+    };
+    if (strategy === "viewport") {
+      useViewport();
+      return;
+    }
+    if (strategy === "standard-shell" || strategy === "legacy-shell") {
+      try {
+        const result = request?.();
+        if (result instanceof Promise) void result.catch(useViewport);
+        window.setTimeout(() => {
+          const fullscreenDocument = document as SafariFullscreenDocument;
+          if (!document.fullscreenElement && !fullscreenDocument.webkitFullscreenElement && fullscreenIntentRef.current) useViewport();
+        }, 600);
+      } catch {
+        useViewport();
       }
       return;
     }
-    const shell = shellRef.current;
-    if (!shell) return;
-    const request = shell.requestFullscreen?.bind(shell) ?? shell.webkitRequestFullscreen?.bind(shell);
-    if (!request) {
-      setViewportFullscreen(true);
-      window.scrollTo(0, 0);
-      return;
-    }
-    const result = request?.();
-    if (result instanceof Promise) void result.catch(() => {
-      setViewportFullscreen(true);
-      window.scrollTo(0, 0);
-    });
   }
+  toggleFullscreenRef.current = toggleFullscreen;
 
   function handlePlayerMouseMove(event: React.MouseEvent<HTMLDivElement>) {
     setControls(true);
     if (transportTimerRef.current !== null) window.clearTimeout(transportTimerRef.current);
     if (controlsTimerRef.current !== null) window.clearTimeout(controlsTimerRef.current);
+    if (shouldArmTitleTimer(titleLingering) && !videoRef.current?.paused) {
+      setTitleLingering(true);
+      if (titleTimerRef.current !== null) window.clearTimeout(titleTimerRef.current);
+      titleTimerRef.current = window.setTimeout(() => setTitleLingering(false), titleDisplayDurationMs);
+    }
     const target = event.target as Element;
     const overControl = Boolean(target.closest(".player-controls button, .seek-wrap, .player-settings"));
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -618,8 +885,9 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     if (overControl || inTransportArea) setTransportHover(true);
     else setTransportHover(false);
     if (!overControl) {
+      const controlsDelay = nearControlZone ? 10_000 : 2_800;
       transportTimerRef.current = window.setTimeout(() => setTransportHover(false), inTransportArea ? 10_000 : 900);
-      controlsTimerRef.current = window.setTimeout(() => setControls(false), nearControlZone ? 10_000 : 2_800);
+      controlsTimerRef.current = window.setTimeout(() => setControls(false), controlsDelay);
     }
   }
 
@@ -636,7 +904,10 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   }
 
   return (
-    <motion.div ref={shellRef} className={`player-shell ${controls ? "" : "player-controls-hidden"} ${pauseCinema ? "player-pause-cinema" : ""} ${viewportFullscreen ? "player-viewport-fullscreen" : ""} ${isAppleTouchDevice() ? "player-apple-touch" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseMove={handlePlayerMouseMove} onMouseLeave={() => { setTransportHover(false); setControls(false); }}>
+    <motion.div ref={shellRef} className={`player-shell ${controls ? "" : "player-controls-hidden"} ${pauseCinema ? "player-pause-cinema" : ""} ${viewportFullscreen ? "player-viewport-fullscreen" : ""} ${isAppleTouchDevice() ? "player-apple-touch" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseMove={handlePlayerMouseMove} onMouseLeave={() => {
+      setTransportHover(false);
+      setControls(false);
+    }}>
       <video
         ref={videoRef}
         className="player-video"
@@ -644,29 +915,34 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
         playsInline
         autoPlay
         x-webkit-airplay="allow"
-        onPlay={() => { setPlaying(true); setPauseCinema(false); }}
+        onPlay={(event) => restorePlaybackAudio(event.currentTarget)}
+        onPlaying={() => { initialPlayPendingRef.current = false; setPlaying(true); setPauseCinema(false); setPauseTitleHandoff(false); setTitleLingering(true); }}
         onPause={(event) => { setPlaying(false); setPauseFrame(captureVideoFrame(event.currentTarget)); report(true); }}
         onTimeUpdate={(event) => { positionRef.current = event.currentTarget.currentTime; setPosition(event.currentTarget.currentTime); syncSubtitleCue(); report(); }}
         onDurationChange={(event) => setDuration(event.currentTarget.duration)}
         onVolumeChange={(event) => {
           setMuted(event.currentTarget.muted);
-          playbackPrefs.current = { ...playbackPrefs.current, muted: event.currentTarget.muted, volume: event.currentTarget.volume };
+          const effectiveVolume = volumeRef.current > 1 && event.currentTarget.volume === 1 ? volumeRef.current : event.currentTarget.volume;
+          volumeRef.current = effectiveVolume;
+          setVolume(effectiveVolume);
+          playbackPrefs.current = { ...playbackPrefs.current, muted: event.currentTarget.muted, volume: effectiveVolume };
           localStorage.setItem(playbackPrefsKey, JSON.stringify(playbackPrefs.current));
         }}
         onSeeked={() => { positionRef.current = videoRef.current?.currentTime ?? positionRef.current; if (videoRef.current?.paused) setPauseFrame(captureVideoFrame(videoRef.current)); syncSubtitleCue(); report(true); }}
-        onClick={(event) => event.currentTarget.paused ? void event.currentTarget.play() : event.currentTarget.pause()}
+        onClick={(event) => event.currentTarget.paused ? void startVideoPlayback(event.currentTarget) : pauseVideoPlayback(event.currentTarget)}
       />
+      {!playing && pauseFrame && <img className="player-paused-frame" src={pauseFrame} alt="" aria-hidden="true" style={{ objectFit: videoFit }} />}
       <AnimatePresence>
-        {pauseCinema && (
+        {titleOwners.pause && (
           <motion.div className="pause-cinema" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .65, ease: [0.22, 1, 0.36, 1] }}>
             <motion.div className="pause-cinema-art" style={{ backgroundImage: `url(${pauseFrame || imageUrl(item, item.BackdropImageTags?.length ? "Backdrop" : "Primary", 1800)})` }} initial={{ scale: 1.055 }} animate={{ scale: 1.02 }} transition={{ duration: 1.1, ease: "easeOut" }} />
             <div className="pause-cinema-shade" />
             <div className="pause-cinema-copy">
               <div className="pause-cinema-heading">
-                <motion.h1 layoutId={`player-title-${item.Id}`} initial={{ opacity: 0, x: reduceMotion ? 0 : -22 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: pauseDelays.title, duration: reduceMotion ? .22 : .58, ease: [0.22, 1, 0.36, 1] }}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <motion.small initial={{ opacity: 0, x: reduceMotion ? 0 : -18, scale: reduceMotion ? 1 : .96 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ delay: pauseDelays.year, duration: reduceMotion ? .22 : .56, ease: [0.22, 1, 0.36, 1] }}>{yearLabel}</motion.small>}</span></motion.h1>
+                <motion.h1 initial={{ opacity: 0, x: reduceMotion ? 0 : -22 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: pauseDelays.title, duration: reduceMotion ? .22 : .58, ease: [0.22, 1, 0.36, 1] }}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <motion.small initial={{ opacity: 0, x: reduceMotion ? 0 : -18, scale: reduceMotion ? 1 : .96 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ delay: pauseDelays.year, duration: reduceMotion ? .22 : .56, ease: [0.22, 1, 0.36, 1] }}>{yearLabel}</motion.small>}</span></motion.h1>
               </div>
               {item.SeriesName && <motion.h2 initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: pauseDelays.episode, duration: reduceMotion ? .22 : .56, ease: [0.22, 1, 0.36, 1] }}>{item.Name}</motion.h2>}
-              {item.Overview && <motion.p initial={{ opacity: 0, y: reduceMotion ? 0 : 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: pauseDelays.synopsis, duration: reduceMotion ? .22 : .62, ease: [0.22, 1, 0.36, 1] }}>{item.Overview}</motion.p>}
+              {item.Overview && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: pauseDelays.synopsis, duration: reduceMotion ? .22 : pauseSynopsisDurationSeconds, ease: [0.22, 1, 0.36, 1] }}>{item.Overview}</motion.p>}
             </div>
           </motion.div>
         )}
@@ -674,14 +950,55 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       {cue && !pauseCinema && <div key={subtitleRenderEpoch} data-render-epoch={subtitleRenderEpoch} className="subtitle-layer" style={{ bottom: `${captionOffset}%`, fontSize: `clamp(${18 * captions.fontSize / 100}px, ${2.1 * captions.fontSize / 100}vw, ${48 * captions.fontSize / 100}px)`, fontWeight: captions.fontWeight, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px` }}><span style={{ background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>{cue}</span></div>}
       <div className="player-vignette" />
       <AnimatePresence>
+        {titleOwners.corner && (
+          <motion.div className="player-title-block" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .5, ease: [0.22, 1, 0.36, 1] }}>
+            <div className="player-title-line"><strong>{item.SeriesName ?? item.Name}</strong>{yearLabel && <small>{yearLabel}</small>}</div>{item.SeriesName && <span>{item.Name}</span>}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
         {controls && (
           <motion.div className="player-controls" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <div className="player-top"><button className="player-icon" aria-label="Close player" onClick={closePlayer}><X /></button>{!pauseCinema && <div><div className="player-title-line"><motion.strong layoutId={`player-title-${item.Id}`}>{item.SeriesName ?? item.Name}</motion.strong>{yearLabel && <small>{yearLabel}</small>}</div>{item.SeriesName && <span>{item.Name}</span>}</div>}</div>
-            {!pauseCinema && !settings && <div className={`player-center ${transportHover ? "transport-hover" : ""}`}>
-              <button className="seek-skip" aria-label="Rewind 10 seconds" onClick={() => { if (videoRef.current) videoRef.current.currentTime -= 10; }}><RotateCcw /><span>10</span></button>
-              <button className="play-main" onClick={() => videoRef.current?.paused ? void videoRef.current?.play() : videoRef.current?.pause()}><PlayPauseGlyph playing={playing} /></button>
-              <button className="seek-skip" aria-label="Forward 10 seconds" onClick={() => { if (videoRef.current) videoRef.current.currentTime += 10; }}><RotateCw /><span>10</span></button>
-            </div>}
+            <div className="player-top"><button className="player-icon" aria-label="Close player" onClick={closePlayer}><X /></button></div>
+            <AnimatePresence>
+              {!pauseCinema && !settings && transportHover && (
+                <motion.div
+                  className="player-center"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: reduceMotion ? .1 : .18, ease: "easeOut" }}
+                >
+                  <motion.div
+                    className="player-center-control"
+                    initial={{ opacity: 0, x: reduceMotion ? 0 : 22, scale: reduceMotion ? 1 : .88 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: reduceMotion ? 0 : 14, scale: reduceMotion ? 1 : .92 }}
+                    transition={{ duration: reduceMotion ? .1 : .24, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <button className="seek-skip" aria-label="Rewind 10 seconds" onClick={() => { if (videoRef.current) videoRef.current.currentTime -= 10; }}><RotateCcw /><span>10</span></button>
+                  </motion.div>
+                  <motion.div
+                    className="player-center-control"
+                    initial={{ opacity: 0, scale: reduceMotion ? 1 : .78 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: reduceMotion ? 1 : .84 }}
+                    transition={{ duration: reduceMotion ? .1 : .27, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <button className="play-main" aria-label={playing ? "Pause" : "Play"} onClick={() => videoRef.current?.paused ? void startVideoPlayback() : pauseVideoPlayback()}><PlayPauseGlyph playing={playing} /></button>
+                  </motion.div>
+                  <motion.div
+                    className="player-center-control"
+                    initial={{ opacity: 0, x: reduceMotion ? 0 : -22, scale: reduceMotion ? 1 : .88 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: reduceMotion ? 0 : -14, scale: reduceMotion ? 1 : .92 }}
+                    transition={{ duration: reduceMotion ? .1 : .24, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <button className="seek-skip" aria-label="Forward 10 seconds" onClick={() => { if (videoRef.current) videoRef.current.currentTime += 10; }}><RotateCw /><span>10</span></button>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <div className="player-bottom">
               <div
                 className="seek-wrap"
@@ -690,7 +1007,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
                 onPointerLeave={() => { if (!seeking) setSeekPreview(null); }}
                 onPointerDown={(event) => { seekingRef.current = true; setSeeking(true); updateSeekPreview(event); if (event.pointerType !== "mouse") event.currentTarget.setPointerCapture(event.pointerId); }}
                 onPointerUp={(event) => { seekingRef.current = false; setSeeking(false); commitSeek(); setSeekPreview(null); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
-                onPointerCancel={() => { seekingRef.current = false; seekTargetRef.current = null; setSeeking(false); setSeekTarget(null); setSeekPreview(null); }}
+                onPointerCancel={() => { seekingRef.current = false; seekTargetRef.current = null; if (scrubRafRef.current !== null) { window.cancelAnimationFrame(scrubRafRef.current); scrubRafRef.current = null; } scrubPendingRef.current = null; setSeeking(false); setSeekTarget(null); setSeekPreview(null); }}
               >
                 {seekPreview && (
                   <div className="seek-preview" style={{ left: `${seekPreview.left}px` }}>
@@ -701,8 +1018,16 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
                 <input className="seek" aria-label="Seek video" type="range" min={0} max={duration || 1} step="0.1" value={seekTarget ?? position} onChange={(event) => changeSeekTarget(Number(event.target.value))} />
               </div>
               <div className="player-row">
-                <button className="player-icon player-bar-play" aria-label={playing ? "Pause" : "Play"} onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()}><PlayPauseGlyph playing={playing} /></button>
-                <button className="player-icon" onClick={() => { if (videoRef.current) videoRef.current.muted = !videoRef.current.muted; }}>{muted ? <VolumeX /> : <Volume2 />}</button>
+                <button className="player-icon player-bar-play" aria-label={playing ? "Pause" : "Play"} onClick={() => videoRef.current?.paused ? void startVideoPlayback() : pauseVideoPlayback()}><PlayPauseGlyph playing={playing} /></button>
+                <div className="player-volume-control">
+                  <button className="player-icon" aria-label={muted ? "Unmute" : "Mute"} onClick={() => { if (videoRef.current) videoRef.current.muted = !videoRef.current.muted; }}>{muted || volume === 0 ? <VolumeX /> : <Volume2 />}</button>
+                  <div className="player-volume-slider">
+                    <button type="button" aria-label="Decrease volume" onClick={() => changeVolume(volumeRef.current - .1)}>−</button>
+                    <input aria-label="Volume, up to 200 percent" type="range" min="0" max="2" step="0.01" value={muted ? 0 : volume} onChange={(event) => changeVolume(Number(event.target.value))} />
+                    <button type="button" aria-label="Increase volume" onClick={() => changeVolume(volumeRef.current + .1)}>+</button>
+                    <output>{Math.round((muted ? 0 : volume) * 100)}%</output>
+                  </div>
+                </div>
                 <span className="timecode"><span>{formatTime(position)}</span><span className="timecode-total"> / {formatTime(duration)}</span></span>
                 <span className="player-spacer" />
                 {item.SeriesId && <button className="player-icon" aria-label="Choose episode" onClick={() => setSettings("episodes")}><ListVideo /></button>}
@@ -719,30 +1044,32 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       {notice && <div className="player-error player-notice" role="status">{notice}</div>}
       <Modal open={settings === "captions"} title="Subtitles" onClose={() => setSettings(null)}>
         <div className="player-settings player-settings-polished">
-          <div className="settings-intro"><Captions /><div><strong>Caption appearance</strong><span>Saved automatically on this device</span></div></div>
-          <div className="caption-preview"><span style={{ fontSize: `${Math.max(13, captions.fontSize * .19)}px`, fontWeight: captions.fontWeight, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px`, background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>Subtitle preview</span></div>
+          <header className="settings-heading"><Captions /><div><strong>Caption appearance</strong><span>Changes save automatically on this device</span></div></header>
           <div className="settings-section">
             <label className="settings-select"><span>Subtitle track</span><select value={subtitleIndex ?? ""} onChange={(event) => chooseSubtitle(event.target.value === "" ? null : Number(event.target.value))}><option value="">Off</option>{subtitles.map((stream) => <option key={stream.Index} value={stream.Index}>{subtitleTrackLabel(stream)}</option>)}</select></label>
           </div>
-          <div className="settings-section settings-sliders">
+          <div className="caption-preview"><span style={{ fontSize: `${Math.max(13, captions.fontSize * .19)}px`, fontWeight: captions.fontWeight, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px`, background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>Subtitle preview</span></div>
+          <section className="settings-group"><h3>Text</h3><div className="settings-section settings-sliders">
             <label><span>Text size <b>{captions.fontSize}%</b></span><input type="range" min="0" max="200" value={captions.fontSize} onChange={(event) => setCaptions({ ...captions, fontSize: captionFontSize(Number(event.target.value)) })} /></label>
             <label><span>Font weight <b>{captions.fontWeight}</b></span><input type="range" min="300" max="800" step="100" value={captions.fontWeight} onChange={(event) => setCaptions({ ...captions, fontWeight: Number(event.target.value) })} /></label>
-            <label><span>Line height <b>{captions.lineHeight.toFixed(2)}</b></span><input type="range" min="1.45" max="2" step="0.05" value={captions.lineHeight} onChange={(event) => setCaptions({ ...captions, lineHeight: captionLineHeight(Number(event.target.value)) })} /></label>
+            <label><span>Line height <b>{captions.lineHeight.toFixed(2)}</b></span><input type="range" min="1.45" max="2" step="0.01" value={captions.lineHeight} onChange={(event) => setCaptions({ ...captions, lineHeight: captionLineHeight(Number(event.target.value)) })} /></label>
             <label><span>Letter spacing <b>{captions.letterSpacing}px</b></span><input type="range" min="-2" max="8" step="0.25" value={captions.letterSpacing} onChange={(event) => setCaptions({ ...captions, letterSpacing: Number(event.target.value) })} /></label>
+          </div></section>
+          <section className="settings-group"><h3>Position & background</h3><div className="settings-section settings-sliders">
             <label><span>Vertical offset <b>{captionOffset}%</b></span><input type="range" min="0" max="30" value={captionOffset} onChange={(event) => setCaptions({ ...captions, [smartphoneLandscape ? "landscapeOffset" : phonePortrait ? "phonePortraitOffset" : "portraitOffset"]: captionVerticalOffset(Number(event.target.value)) })} /></label>
             <label><span>Background opacity <b>{Math.round(captions.backgroundOpacity * 100)}%</b></span><input type="range" min="0" max="1" step="0.05" value={captions.backgroundOpacity} onChange={(event) => setCaptions({ ...captions, backgroundOpacity: Number(event.target.value) })} /></label>
-          </div>
+          </div></section>
           <div className="settings-actions"><Button variant="ghost" onClick={() => setCaptions(defaultCaptions)}>Reset</Button><Button variant="secondary" onClick={() => setSettings(null)}>Done</Button></div>
         </div>
       </Modal>
       <Modal open={settings === "playback"} title="Settings" onClose={() => setSettings(null)}>
         <div className="player-settings player-settings-polished">
-          <div className="settings-intro"><SlidersHorizontal /><div><strong>Playback</strong><span>Picture and motion controls</span></div></div>
-          <div className="settings-speed"><span>Playback speed</span><div>{[.5, .75, 1, 1.25, 1.5, 2].map((rate) => <button key={rate} className={playbackRate === rate ? "active" : ""} onClick={() => setPlaybackRate(rate)}>{rate}×</button>)}</div></div>
-          <div className="settings-choice"><span>Picture fit</span><div><button className={videoFit === "contain" ? "active" : ""} onClick={() => setVideoFit("contain")}>Fit</button><button className={videoFit === "cover" ? "active" : ""} onClick={() => setVideoFit("cover")}>Fill</button></div></div>
-          <label><span>Volume <b>{Math.round((videoRef.current?.volume ?? playbackPrefs.current.volume) * 100)}%</b></span><input type="range" min="0" max="1" step="0.01" defaultValue={playbackPrefs.current.volume} onChange={(event) => { if (videoRef.current) { videoRef.current.volume = Number(event.target.value); videoRef.current.muted = false; } }} /></label>
-          <button className="stats-toggle" onClick={() => setStatsOpen((open) => !open)} aria-expanded={statsOpen}>Stats for nerds <span>{statsOpen ? "Hide" : "Show"}</span></button>
-          {statsOpen && <div className="stats-panel">{playbackStats.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>}
+          <header className="settings-heading"><SlidersHorizontal /><div><strong>Playback settings</strong><span>Speed, picture, audio, and diagnostics</span></div></header>
+          <section className="settings-group"><h3>Playback</h3><div className="settings-speed"><span>Speed</span><div>{[.5, .75, 1, 1.25, 1.5, 2].map((rate) => <button key={rate} className={playbackRate === rate ? "active" : ""} onClick={() => setPlaybackRate(rate)}>{rate}×</button>)}</div></div></section>
+          <section className="settings-group"><h3>Picture</h3><div className="settings-choice"><span>Fit</span><div><button className={videoFit === "contain" ? "active" : ""} onClick={() => setVideoFit("contain")}>Fit</button><button className={videoFit === "cover" ? "active" : ""} onClick={() => setVideoFit("cover")}>Fill</button></div></div></section>
+          <section className="settings-group"><h3>Audio</h3><label><span>Volume <b>{Math.round((muted ? 0 : volume) * 100)}%</b></span><input aria-label="Volume, up to 200 percent" type="range" min="0" max="2" step="0.01" value={muted ? 0 : volume} onChange={(event) => changeVolume(Number(event.target.value))} /></label></section>
+          <section className="settings-group"><h3>Diagnostics</h3><button className="stats-toggle" onClick={() => setStatsOpen((open) => !open)} aria-expanded={statsOpen}>Stats for nerds <span>{statsOpen ? "Hide" : "Show"}</span></button>
+          {statsOpen && <div className="stats-panel">{playbackStats.map(([label, value]) => <div key={label}><span>{label}</span><strong title={value}>{value}</strong></div>)}</div>}</section>
           <div className="settings-actions"><Button variant="secondary" onClick={() => setSettings(null)}>Done</Button></div>
         </div>
       </Modal>

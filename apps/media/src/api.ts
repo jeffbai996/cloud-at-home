@@ -1,4 +1,4 @@
-import { webPlaybackProfile } from "./playback";
+import { webPlaybackProfileFor } from "./playback";
 
 export type Session = { user: { id: string; name: string }; csrf: string };
 
@@ -10,6 +10,7 @@ export type MediaItem = {
   PremiereDate?: string;
   EndDate?: string;
   Status?: string;
+  ChildCount?: number;
   SeriesProductionYear?: number;
   SeriesEndDate?: string;
   Overview?: string;
@@ -54,6 +55,13 @@ export type PlaybackInfo = {
       DisplayTitle?: string;
       Language?: string;
       Codec?: string;
+      Profile?: string;
+      BitDepth?: number;
+      RealFrameRate?: number;
+      AverageFrameRate?: number;
+      BitRate?: number;
+      Channels?: number;
+      SampleRate?: number;
       Width?: number;
       Height?: number;
       IsDefault?: boolean;
@@ -155,24 +163,14 @@ export function imageUrl(item: MediaItem, kind: "Primary" | "Backdrop" = "Primar
   return `/api/media/proxy/Items/${item.Id}/Images/${kind}?maxWidth=${width}&quality=88${cacheKey}`;
 }
 
-export function normalizeSubtitleVtt(value: string): string {
-  return value
-    .replace(/^\uFEFF/, "")
-    .replace(/\r\n?/g, "\n")
-    .replace(/^Region:[^\n]*\n+/m, "");
+export function subtitleTrackUrl(itemId: string, sourceId: string, index: number): string {
+  return `/api/media/subtitles/${encodeURIComponent(itemId)}/${encodeURIComponent(sourceId)}/${index}.vtt`;
 }
 
-export async function loadSubtitleTrack(itemId: string, sourceId: string, index: number): Promise<string> {
-  const path = `Videos/${encodeURIComponent(itemId)}/${encodeURIComponent(sourceId)}/Subtitles/${index}/Stream.vtt`;
-  const response = await authenticatedFetch(`/api/media/proxy/${path}`);
-  if (!response.ok) throw await responseError(response);
-  const vtt = normalizeSubtitleVtt(await response.text());
-  if (!vtt.startsWith("WEBVTT")) throw new Error("Invalid subtitle data returned by Jellyfin.");
-  return URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
-}
+export const homeItemFields = "Overview,PrimaryImageAspectRatio,DateCreated,PremiereDate,EndDate,Status,ChildCount,Genres,Studios,ProductionLocations,ProviderIds,OfficialRating,CommunityRating,CriticRating";
 
 export async function loadHome(userId: string) {
-  const fields = "Overview,PrimaryImageAspectRatio,MediaSources,DateCreated,PremiereDate,EndDate,Status,Genres,Studios,ProductionLocations,ProviderIds,OfficialRating,CommunityRating,CriticRating";
+  const fields = homeItemFields;
   const [resume, latest, movies, series] = await Promise.all([
     mediaRequest<{ Items: MediaItem[] }>(`Users/${userId}/Items/Resume?Limit=20&MediaTypes=Video&Fields=${fields}`),
     mediaRequest<MediaItem[]>(`Users/${userId}/Items/Latest?Limit=24&IncludeItemTypes=Movie,Episode&Fields=${fields}`),
@@ -252,7 +250,7 @@ export async function getMediaItem(itemId: string, userId: string): Promise<Medi
   );
 }
 
-export async function getPlaybackInfo(itemId: string, userId: string): Promise<PlaybackInfo> {
+export async function getPlaybackInfo(itemId: string, userId: string, supportsHevc = false): Promise<PlaybackInfo> {
   return mediaRequest<PlaybackInfo>(`Items/${itemId}/PlaybackInfo?UserId=${userId}`, {
     method: "POST",
     body: JSON.stringify({
@@ -261,7 +259,7 @@ export async function getPlaybackInfo(itemId: string, userId: string): Promise<P
       EnableDirectStream: true,
       EnableTranscoding: true,
       SubtitleStreamIndex: -1,
-      DeviceProfile: webPlaybackProfile,
+      DeviceProfile: webPlaybackProfileFor(supportsHevc),
     }),
   });
 }
@@ -286,3 +284,4 @@ export async function createStreamTicket(itemId: string): Promise<string> {
 export function ticketedStreamUrl(ticket: string, target: string): string {
   return `/api/media/stream/${encodeURIComponent(ticket)}/${target.replace(/^\//, "")}`;
 }
+

@@ -2,7 +2,7 @@ export type RatingBadge = {
   label: string;
   scheme: "ca" | "ca-tv" | "us-tv" | "us-film" | "plain";
   shape: "circle" | "rounded" | "hex" | "triangle" | "octagon" | "plaque";
-  tone: "green" | "yellow" | "orange" | "blue" | "red" | "mono";
+  tone: "green" | "yellow" | "orange" | "blue" | "red" | "purple" | "mono";
   ariaLabel: string;
   name: string;
   authority: string;
@@ -41,12 +41,18 @@ const tvGuidance: Record<string, RatingGuidance> = {
 };
 
 const mpaGuidance: Record<string, RatingGuidance> = {
-  G: { name: "General Audiences", authority: "Motion Picture Association of America", description: "All ages admitted.", authorityUrl: mpaUrl },
-  PG: { name: "Parental Guidance Suggested", authority: "Motion Picture Association of America", description: "Some material may not be suitable for children.", authorityUrl: mpaUrl },
-  "PG-13": { name: "Parents Strongly Cautioned", authority: "Motion Picture Association of America", description: "Some material may be inappropriate for children under 13.", authorityUrl: mpaUrl },
-  R: { name: "Restricted", authority: "Motion Picture Association of America", description: "Under 17 requires an accompanying parent or adult guardian.", authorityUrl: mpaUrl },
-  "NC-17": { name: "Adults Only", authority: "Motion Picture Association of America", description: "No one 17 and under admitted.", authorityUrl: mpaUrl },
-  NR: { name: "Not Rated", authority: "Motion Picture Association of America", description: "This title has not been assigned an MPAA rating.", authorityUrl: mpaUrl },
+  G: { name: "General Audiences", authority: "Motion Picture Association", description: "All ages admitted.", authorityUrl: mpaUrl },
+  PG: { name: "Parental Guidance Suggested", authority: "Motion Picture Association", description: "Some material may not be suitable for children.", authorityUrl: mpaUrl },
+  "PG-13": { name: "Parents Strongly Cautioned", authority: "Motion Picture Association", description: "Some material may be inappropriate for children under 13.", authorityUrl: mpaUrl },
+  R: { name: "Restricted", authority: "Motion Picture Association", description: "Under 17 requires an accompanying parent or adult guardian.", authorityUrl: mpaUrl },
+  "NC-17": { name: "Adults Only", authority: "Motion Picture Association", description: "No one 17 and under admitted.", authorityUrl: mpaUrl },
+  NR: { name: "Not Rated", authority: "Motion Picture Association", description: "This title has not been assigned an MPAA rating.", authorityUrl: mpaUrl },
+};
+
+// The MPA's own letter colors (per the official rating cards): G green, PG
+// orange, PG-13 purple, R red, NC-17 blue. Beats a wall of gray.
+const mpaTones: Record<string, RatingBadge["tone"]> = {
+  G: "green", PG: "orange", "PG-13": "purple", R: "red", "NC-17": "blue", NR: "mono",
 };
 
 const canadianTones: Record<string, RatingBadge["tone"]> = {
@@ -88,7 +94,7 @@ export function ratingBadge(value: string): RatingBadge {
     return { label: rating, scheme: "us-tv", shape: "plaque", tone: "mono", ariaLabel: `TV rating ${rating}`, ...tvGuidance[rating] };
   }
   if (/^(G|PG|PG-13|R|NC-17|NR)$/.test(rating)) {
-    return { label: rating, scheme: "us-film", shape: "plaque", tone: "mono", ariaLabel: `Rated ${rating}`, ...mpaGuidance[rating] };
+    return { label: rating, scheme: "us-film", shape: "plaque", tone: mpaTones[rating] ?? "mono", ariaLabel: `Rated ${rating}`, ...mpaGuidance[rating] };
   }
   return { label: value, scheme: "plain", shape: "plaque", tone: "mono", ariaLabel: `Rated ${value}`, name: value, authority: "Media library", description: "No classification guidance is available for this rating.", authorityUrl: undefined };
 }

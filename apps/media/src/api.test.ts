@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { episodesForSeries, httpErrorMessage, imageUrl, normalizeSubtitleVtt, watchHistoryItemIds, type MediaItem } from "./api";
+import { episodesForSeries, homeItemFields, httpErrorMessage, imageUrl, subtitleTrackUrl, watchHistoryItemIds, type MediaItem } from "./api";
 
 const episode = (id: string, seriesId?: string): MediaItem => ({
   Id: id,
@@ -25,9 +25,8 @@ describe("media errors", () => {
     expect(httpErrorMessage(502, "Bad Gateway", "Jellyfin is unavailable")).toBe("502: Jellyfin is unavailable");
   });
 
-  it("normalizes Jellyfin VTT output for Safari", () => {
-    expect(normalizeSubtitleVtt("\uFEFFWEBVTT\r\n\r\nRegion: id:subtitle width:80%\r\n\r\n00:00:01.000 --> 00:00:02.000\r\nHello\r\n"))
-      .toBe("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n");
+  it("uses a stable same-origin subtitle URL that native iOS fullscreen can load", () => {
+    expect(subtitleTrackUrl("movie-123", "source-456", 3)).toBe("/api/media/subtitles/movie-123/source-456/3.vtt");
   });
 });
 
@@ -35,6 +34,12 @@ describe("media artwork", () => {
   it("uses Jellyfin image tags to invalidate stale poster caches", () => {
     const item: MediaItem = { Id: "movie-1", Name: "Example", Type: "Movie", ImageTags: { Primary: "poster-v2" } };
     expect(imageUrl(item)).toContain("tag=poster-v2");
+  });
+});
+
+describe("home library payload", () => {
+  it("defers heavyweight playback sources until a title is played", () => {
+    expect(homeItemFields.split(",")).not.toContain("MediaSources");
   });
 });
 

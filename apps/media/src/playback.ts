@@ -8,7 +8,48 @@ export const progressEvents = [
 ] as const;
 
 export const airPlayNoticeDurationMs = 5_000;
-export const captionPrefsVersion = 2;
+export const captionPrefsVersion = 4;
+export const titleDisplayDurationMs = 7_000;
+export const pauseSynopsisDurationSeconds = 1.05;
+
+export type PlayerKeyboardAction = "toggle" | "seek-back" | "seek-forward" | "volume-up" | "volume-down" | "mute" | "captions" | "fullscreen";
+
+export function playerKeyboardAction(key: string, code = ""): PlayerKeyboardAction | null {
+  const normalizedKey = key.toLowerCase();
+  const normalizedCode = code.toLowerCase();
+  if (key === " " || key === "Spacebar" || normalizedKey === "k" || normalizedCode === "space" || normalizedCode === "keyk") return "toggle";
+  if (normalizedKey === "arrowleft" || normalizedKey === "j" || normalizedCode === "arrowleft" || normalizedCode === "keyj") return "seek-back";
+  if (normalizedKey === "arrowright" || normalizedKey === "l" || normalizedCode === "arrowright" || normalizedCode === "keyl") return "seek-forward";
+  if (normalizedKey === "arrowup" || normalizedCode === "arrowup") return "volume-up";
+  if (normalizedKey === "arrowdown" || normalizedCode === "arrowdown") return "volume-down";
+  if (normalizedKey === "m" || normalizedCode === "keym") return "mute";
+  if (normalizedKey === "c" || normalizedCode === "keyc") return "captions";
+  if (normalizedKey === "f" || normalizedCode === "keyf") return "fullscreen";
+  return null;
+}
+
+export function isPlaybackToggleKey(key: string, code = ""): boolean {
+  return playerKeyboardAction(key, code) === "toggle";
+}
+
+export function shouldArmTitleTimer(titleVisible: boolean): boolean {
+  // Pointer movement fires continuously. Only a hidden title should start a
+  // fresh display window; otherwise mouse jitter can postpone hiding forever.
+  return !titleVisible;
+}
+
+export function playerTitleOwners(pauseCinema: boolean, titleLingering: boolean, pauseTitleHandoff = false): {
+  corner: boolean;
+  pause: boolean;
+} {
+  // Keep the corner copy stationary while the pause backdrop fades in. The
+  // copies are not shared-layout elements, so this overlap cannot pull or clip
+  // the corner title toward its larger pause-screen position.
+  return {
+    corner: titleLingering && (!pauseCinema || pauseTitleHandoff),
+    pause: pauseCinema,
+  };
+}
 
 export function migrateCaptionDefaults<T extends {
   version?: number;
@@ -20,7 +61,7 @@ export function migrateCaptionDefaults<T extends {
   if (saved.version === captionPrefsVersion) return saved;
   const migrated = { ...saved };
   if (saved.fontSize === 75) migrated.fontSize = 85;
-  if (saved.lineHeight === 1.25) migrated.lineHeight = 1.45;
+  if (saved.lineHeight === 1.25 || saved.lineHeight === 1.45 || saved.lineHeight === 1.53) migrated.lineHeight = 1.52;
   if (saved.backgroundOpacity === .72) migrated.backgroundOpacity = .5;
   if (saved.portraitOffset === 8) migrated.portraitOffset = 12;
   return migrated;
@@ -37,12 +78,26 @@ export function captionVerticalOffset(value?: number): number {
 }
 
 export function captionLineHeight(value?: number): number {
-  if (!Number.isFinite(value)) return 1.45;
+  if (!Number.isFinite(value)) return 1.52;
   return Math.min(2, Math.max(1.45, value as number));
 }
 
-export function usesNativeVideoFullscreen(userAgent: string): boolean {
-  return /iPhone|iPod/.test(userAgent);
+export function prefersViewportFullscreen(maxTouchPoints = 0, coarsePointer = false, userAgent = ""): boolean {
+  // Browser and UA claims are not trustworthy on iOS. A touch-capable or
+  // coarse-pointer client never probes fullscreen APIs that WebKit can redirect
+  // into Apple's native video player.
+  const maskedIPadBrave = /Macintosh.*AppleWebKit\/605\..*Safari\/.*\bBrave\b/.test(userAgent);
+  return maxTouchPoints > 0 || coarsePointer || maskedIPadBrave;
+}
+
+export function fullscreenStrategy(
+  canStandardFullscreenShell: boolean,
+  canLegacyFullscreenShell: boolean,
+  forbidLegacyFullscreen = false,
+): "standard-shell" | "legacy-shell" | "viewport" {
+  if (canStandardFullscreenShell) return "standard-shell";
+  if (canLegacyFullscreenShell && !forbidLegacyFullscreen) return "legacy-shell";
+  return "viewport";
 }
 
 export function airPlayUnavailableMessage(userAgent: string): string {
@@ -62,8 +117,8 @@ export function pauseCinemaDelays(hasEpisode: boolean): {
   synopsis: number;
 } {
   return hasEpisode
-    ? { title: .12, year: .82, episode: 1.52, synopsis: 2.22 }
-    : { title: .12, year: .82, synopsis: 1.52 };
+    ? { title: .62, year: 1.32, episode: 2.02, synopsis: 2.72 }
+    : { title: .62, year: 1.32, synopsis: 2.02 };
 }
 
 export function shouldAutoPictureInPicture(paused: boolean, ended: boolean, readyState: number): boolean {
@@ -73,26 +128,73 @@ export function shouldAutoPictureInPicture(paused: boolean, ended: boolean, read
 export type PlaybackStatsInput = {
   width?: number;
   height?: number;
+  viewportWidth?: number;
+  viewportHeight?: number;
   mode: string;
   container?: string;
   videoCodec?: string;
+  videoProfile?: string;
+  bitDepth?: number;
+  frameRate?: number;
+  videoBitrate?: number;
   audioCodec?: string;
+  audioChannels?: number;
+  sampleRate?: number;
+  audioBitrate?: number;
+  position?: number;
+  duration?: number;
   bufferedSeconds?: number;
   droppedFrames?: number;
   totalFrames?: number;
+  bandwidth?: number;
+  hlsLevel?: string;
+  readyState?: number;
+  networkState?: number;
   rate: number;
 };
+
+function mediaTime(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const remaining = safe % 60;
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
+}
+
+function bitrate(value: number): string {
+  return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(2)} Mbps` : `${Math.round(value / 1_000)} kbps`;
+}
 
 export function formatPlaybackStats(input: PlaybackStatsInput): Array<[string, string]> {
   const stats: Array<[string, string]> = [];
   if (input.width && input.height) stats.push(["Resolution", `${input.width} × ${input.height}`]);
+  if (input.viewportWidth && input.viewportHeight) stats.push(["Player", `${input.viewportWidth} × ${input.viewportHeight}`]);
   stats.push(["Playback", input.mode]);
   if (input.container) stats.push(["Container", input.container.toUpperCase()]);
-  if (input.videoCodec) stats.push(["Video", input.videoCodec.toUpperCase()]);
-  if (input.audioCodec) stats.push(["Audio", input.audioCodec.toUpperCase()]);
+  if (input.videoCodec) {
+    const details = [input.videoCodec.toUpperCase(), input.videoProfile, input.bitDepth ? `${input.bitDepth}-bit` : undefined].filter(Boolean);
+    stats.push(["Video", details.join(" · ")]);
+  }
+  if (Number.isFinite(input.frameRate)) stats.push(["Frame rate", `${input.frameRate?.toFixed(3).replace(/\.0+$/, "")} fps`]);
+  if (Number.isFinite(input.videoBitrate)) stats.push(["Video bitrate", bitrate(input.videoBitrate ?? 0)]);
+  if (input.audioCodec) {
+    const details = [input.audioCodec.toUpperCase(), input.audioChannels ? `${input.audioChannels} ch` : undefined, input.sampleRate ? `${input.sampleRate / 1_000} kHz` : undefined].filter(Boolean);
+    stats.push(["Audio", details.join(" · ")]);
+  }
+  if (Number.isFinite(input.audioBitrate)) stats.push(["Audio bitrate", bitrate(input.audioBitrate ?? 0)]);
+  if (Number.isFinite(input.position) && Number.isFinite(input.duration)) stats.push(["Position", `${mediaTime(input.position ?? 0)} / ${mediaTime(input.duration ?? 0)}`]);
   if (Number.isFinite(input.bufferedSeconds)) stats.push(["Buffer", `${Math.max(0, input.bufferedSeconds ?? 0).toFixed(1)} s`]);
   if (Number.isFinite(input.droppedFrames) && Number.isFinite(input.totalFrames)) {
     stats.push(["Frames", `${input.droppedFrames?.toLocaleString()} dropped / ${input.totalFrames?.toLocaleString()}`]);
+  }
+  if (input.hlsLevel) stats.push(["HLS level", input.hlsLevel]);
+  if (Number.isFinite(input.bandwidth)) stats.push(["Bandwidth", bitrate(input.bandwidth ?? 0)]);
+  if (Number.isFinite(input.readyState) && Number.isFinite(input.networkState)) {
+    const ready = ["Empty", "Metadata", "Current data", "Future data", "Ready"][input.readyState ?? 0] ?? `Ready ${input.readyState}`;
+    const network = ["Empty", "Idle", "Loading", "No source"][input.networkState ?? 0] ?? `Network ${input.networkState}`;
+    stats.push(["Media state", `${ready} · ${network}`]);
   }
   stats.push(["Speed", `${input.rate}×`]);
   return stats;
@@ -124,6 +226,32 @@ export const webPlaybackProfile = {
     { Format: "webvtt", Method: "External" },
   ],
 } as const;
+
+export function webPlaybackProfileFor(supportsHevc: boolean) {
+  if (!supportsHevc) return webPlaybackProfile;
+  return {
+    ...webPlaybackProfile,
+    DirectPlayProfiles: [
+      ...webPlaybackProfile.DirectPlayProfiles,
+      { Container: "mp4,m4v", Type: "Video", VideoCodec: "hevc,h265", AudioCodec: "aac,mp3,ac3,eac3" },
+      { Container: "hls", Type: "Video", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3" },
+    ],
+    TranscodingProfiles: [
+      {
+        Container: "mp4",
+        Type: "Video",
+        VideoCodec: "hevc,h264",
+        AudioCodec: "eac3,ac3,aac",
+        Protocol: "hls",
+        Context: "Streaming",
+        MaxAudioChannels: "8",
+        MinSegments: 2,
+        SegmentLength: 1,
+        BreakOnNonKeyFrames: true,
+      },
+    ],
+  } as const;
+}
 
 export function shouldReportProgress(input: {
   previous: number;
