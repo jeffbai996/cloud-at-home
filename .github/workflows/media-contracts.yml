@@ -1,27 +1,37 @@
-name: Media contracts
+name: Video contracts
 
 on:
   pull_request:
     paths:
       - "apps/media/**"
+      - "tests/e2e/staging.spec.ts"
+      - "playwright.config.ts"
       - "package.json"
       - "package-lock.json"
+      - "scripts/check-media-contracts.sh"
       - ".github/workflows/media-contracts.yml"
   push:
     branches: [main]
     paths:
       - "apps/media/**"
+      - "tests/e2e/staging.spec.ts"
+      - "playwright.config.ts"
       - "package.json"
       - "package-lock.json"
+      - "scripts/check-media-contracts.sh"
       - ".github/workflows/media-contracts.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: cloud-media-contracts-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   contracts:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,5 +39,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Verify public media contracts
+      - run: npx playwright install --with-deps chromium
+      - name: Verify Video product contracts
         run: scripts/check-media-contracts.sh
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-media-contract-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
