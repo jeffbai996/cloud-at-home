@@ -68,3 +68,16 @@ runtime directory, and start the stack:
 gateway/venv/bin/python deploy/init_runtime.py
 docker compose -f deploy/compose.yaml up -d --build
 ```
+
+Rollback is `deploy/rollback.sh`; it stops only Cloud Files staging.
+
+## Public-source safety
+
+The repository uses neutral product names and must not inherit deployment-only
+branding, hostnames, URLs, credentials, or personal data. Run
+`npm run check:public` before committing; the same check runs in CI and as part
+of `npm test`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
