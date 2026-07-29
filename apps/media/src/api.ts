@@ -35,7 +35,6 @@ export type PlaybackInfo = {
   PlaySessionId: string;
   MediaSources: Array<{
     Id: string;
-    Path?: string;
     Container?: string;
     SupportsDirectPlay: boolean;
     SupportsTranscoding: boolean;
@@ -66,7 +65,6 @@ export type PlaybackInfo = {
       Height?: number;
       IsDefault?: boolean;
       IsExternal?: boolean;
-      DeliveryUrl?: string;
     }>;
   }>;
 };
@@ -250,15 +248,10 @@ export async function getMediaItem(itemId: string, userId: string): Promise<Medi
   );
 }
 
-export async function getPlaybackInfo(itemId: string, userId: string, supportsHevc = false): Promise<PlaybackInfo> {
-  return mediaRequest<PlaybackInfo>(`Items/${itemId}/PlaybackInfo?UserId=${userId}`, {
+export async function getPlaybackInfo(itemId: string, supportsHevc = false): Promise<PlaybackInfo> {
+  return json<PlaybackInfo>(`/api/media/items/${encodeURIComponent(itemId)}/playback`, {
     method: "POST",
     body: JSON.stringify({
-      UserId: userId,
-      EnableDirectPlay: true,
-      EnableDirectStream: true,
-      EnableTranscoding: true,
-      SubtitleStreamIndex: -1,
       DeviceProfile: webPlaybackProfileFor(supportsHevc),
     }),
   });
@@ -284,4 +277,3 @@ export async function createStreamTicket(itemId: string): Promise<string> {
 export function ticketedStreamUrl(ticket: string, target: string): string {
   return `/api/media/stream/${encodeURIComponent(ticket)}/${target.replace(/^\//, "")}`;
 }
-

@@ -30,7 +30,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8090:80"
+      - "127.0.0.1:8090:80"
 
   files:
     build:
@@ -46,4 +46,20 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8082:80"
+      - "127.0.0.1:8082:80"
+
+  photos:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+      args:
+        APP: photos
+    container_name: cloud-home-photos
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8083:80"

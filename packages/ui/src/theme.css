@@ -1,5 +1,15 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
+/* Same-origin variable face shared with Video. The old public-host URL was
+   blocked by Cloud at Home's CSP and silently fell back to Inter. */
+@font-face {
+  font-family: "Anthropic Sans";
+  src: url("/fonts/AnthropicSansVariable-TextRegular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
   --bg: #101114;
@@ -17,6 +27,7 @@
   --pink: #f92672;
   --orange: #ff8a1f;
   --violet: #ae81ff;
+  --yellow: #f5c042;
   --danger: #ff5c57;
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.52);
   --radius-sm: 9px;
@@ -61,19 +72,23 @@ button { color: inherit; }
 :root[data-theme="oled"] .app::before { background: linear-gradient(180deg, rgba(0,0,0,.62), rgba(0,0,0,.90) 82%), radial-gradient(900px 460px at 20% -10%, rgba(174,129,255,.08), transparent 65%); }
 .app > main, .topbar { position: relative; z-index: 1; }
 
-.topbar { height: var(--topbar); position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(22px) saturate(145%); }
+.topbar { min-height: var(--topbar); box-sizing: content-box; position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; padding: calc(env(safe-area-inset-top, 0px) + 10px) 22px 10px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(22px) saturate(145%); }
 .topbar-left, .topbar-actions { display: flex; align-items: center; gap: 10px; }
 .brand { display: flex; align-items: center; gap: 10px; font-family: "Plus Jakarta Sans", sans-serif; font-weight: 700; letter-spacing: -0.025em; }
 .brand-mark, .app-glyph { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; color: #050505; background: var(--green); box-shadow: inset 0 1px rgba(255,255,255,.35), 0 8px 30px rgba(166,226,46,.12); }
 .brand-mark-files, .app-glyph-files { background: var(--violet); }
 .brand-mark-ai, .app-glyph-ai { background: var(--pink); }
 .app-glyph-media { background: var(--orange); }
+.brand-mark-photos, .app-glyph-photos { background: var(--yellow); color: #1d1503; }
+.app-glyph-games { background: var(--violet); }   /* violet = Games' own accent; green belongs to Music app */
+.app-glyph-music app { background: #1db954; }        /* Spotify-green = Music app */
 .app-glyph-extra { background: #63d6ff; }
 .app-media { --app-accent: var(--orange); }
+.app-photos { --app-accent: var(--yellow); --accent: var(--yellow); }
 .app-files { --blue: #208cff; --blue-bright: #55aaff; --green: var(--blue); --violet: var(--blue); --app-accent: var(--blue); }
 .app-files::before { background: linear-gradient(180deg, rgba(5,12,22,.34), rgba(5,10,18,.78) 82%), radial-gradient(900px 520px at 16% -8%, rgba(32,140,255,.22), transparent 66%), radial-gradient(720px 440px at 92% 4%, rgba(72,180,255,.10), transparent 64%); }
 :root[data-theme="oled"] .app-files::before { background: linear-gradient(180deg, rgba(0,4,10,.62), rgba(0,2,6,.92) 82%), radial-gradient(900px 520px at 16% -8%, rgba(32,140,255,.16), transparent 66%); }
-.app-files .brand { gap: 12px; font-size: 20px; font-weight: 750; letter-spacing: -.04em; }
+.app-files .brand { gap: 12px; font-size: 22px; font-weight: 750; letter-spacing: -.04em; }   /* wordmark up a couple notches 20->22 */
 .app-files .brand-mark-files, .app-files .app-glyph-files { color: #fff; background: linear-gradient(145deg, var(--blue-bright), var(--blue)); box-shadow: inset 0 1px rgba(255,255,255,.35), 0 9px 30px rgba(32,140,255,.24); }
 .app-files .brand-mark-files { width: 36px; height: 36px; border-radius: 12px; }
 .app-files .brand-mark-files svg { width: 20px; height: 20px; }
@@ -81,10 +96,16 @@ button { color: inherit; }
 .icon-button { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 11px; background: transparent; color: var(--text-2); cursor: pointer; transition: .18s ease; }
 .icon-button:hover, .icon-button[data-state="open"] { background: var(--surface-2); border-color: var(--line); color: var(--text); transform: translateY(-1px); }
 .icon-button > span { display: grid; }
-.app-switcher-trigger { width: 38px; border-color: transparent; border-radius: 11px; background: transparent; color: #fff; }
-.cloud-cloud-mark { width: 24px; height: 24px; color: var(--text-2); transform: translateY(-.5px); transition: color .18s ease, transform .18s ease; }
+/* padding:0 — the mark is 24px and an .icon-button's padded content box
+   can be narrower; a grid item that overflows pins left instead of
+   centring, which is exactly the drift this rule prevents. */
+.app-switcher-trigger { width: 38px; padding: 0; border-color: transparent; border-radius: 11px; background: transparent; color: #fff; }
+/* No nudge transform: the mark's viewBox now centres its own ink (see CloudMark). */
+.cloud-home-cloud-mark { width: 24px; height: 24px; color: var(--text-2); transition: color .18s ease, transform .18s ease; }
 .app-switcher-trigger:hover, .app-switcher-trigger[data-state="open"] { border-color: var(--line); background: var(--surface-2); color: var(--text); transform: translateY(-1px); }
-.app-switcher-trigger:hover .cloud-cloud-mark, .app-switcher-trigger[data-state="open"] .cloud-cloud-mark { color: inherit; transform: translateY(-.5px) scale(1.035); }
+.app-switcher-trigger:hover .cloud-home-cloud-mark, .app-switcher-trigger[data-state="open"] .cloud-home-cloud-mark { color: inherit; transform: scale(1.035); }
+.topbar-signout { color: #ff777f; }
+.topbar-signout:hover { border-color: rgba(255,92,103,.22); background: rgba(255,92,103,.10); color: #ff9ba1; }
 
 .dropdown { min-width: 220px; padding: 7px; border: 1px solid var(--line-strong); border-radius: 15px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(26px) saturate(150%); box-shadow: var(--shadow); animation: dropdown-in .16s ease-out; z-index: 100; }
 .dropdown-label { padding: 9px 10px 7px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
@@ -117,6 +138,20 @@ label > span { display: block; margin: 0 0 7px; color: var(--text-2); font-size:
 .glass-panel { border: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(26px) saturate(140%); box-shadow: var(--shadow); }
 .login-stage { min-height: calc(100vh - var(--topbar)); display: grid; place-items: center; padding: 28px; background: radial-gradient(circle at 50% 48%, transparent 0, rgba(0,0,0,.34) 62%, rgba(0,0,0,.66) 100%); }
 .login-card { width: min(430px, 100%); display: grid; gap: 19px; padding: 30px; border-radius: var(--radius-lg); }
+/* Cloud at Home Drive body/UI font → Anthropic Sans. Scoped to
+   .app-files so the other apps keep Inter. Big headings and the eyebrow stay on
+   Plus Jakarta Sans: the headings already set it explicitly (they win over this
+   cascade), and .eyebrow is kept below since it sets no family of its own. */
+.app-files { font-family: "Anthropic Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.app-files .eyebrow { font-family: "Plus Jakarta Sans", sans-serif; }
+
+/* Center the Drive login in the FULL viewport, not viewport-minus-topbar. The
+   shared .login-stage subtracts --topbar from its height and sits below the header,
+   so its center landed ~56% down (visibly low). Reclaim the topbar band and span the
+   whole viewport so the card centers at 50%. Scoped to .app-files
+   so only Drive changes. The card is far from the top edge, so it never rides under
+   the header. */
+.app-files .login-stage { min-height: 100vh; margin-top: calc(-1 * var(--topbar)); }
 .app-files .login-card { width: min(470px, 100%); gap: 21px; padding: 38px; border-color: rgba(85,170,255,.20); background: linear-gradient(160deg, rgba(23,31,43,.94), rgba(11,16,24,.92)); box-shadow: 0 28px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(32,140,255,.06); }
 .app-files .login-card label > span { font-size: 12.5px; }
 .app-files .login-card input { min-height: 48px; border-color: rgba(255,255,255,.12); background: rgba(5,10,17,.72); }
@@ -151,3 +186,20 @@ label > span { display: block; margin: 0 0 7px; color: var(--text-2); font-size:
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .001ms !important; }
 }
+
+/* ── shared lightbox (Photos, and Drive's integrated viewer) ───────────── */
+.lightbox { position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column;
+  background: color-mix(in srgb, var(--bg, #0b0b0d) 88%, transparent);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.lightbox-bar { display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 10px 14px; }
+.lightbox-name { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lightbox-actions { display: flex; align-items: center; gap: 6px; }
+.lightbox-stage { flex: 1; display: flex; align-items: center; justify-content: center;
+  min-height: 0; padding: 0 12px 12px; }
+.lightbox-stage img, .lightbox-stage video { max-width: 100%; max-height: 100%;
+  object-fit: contain; border-radius: 10px; }
+.lightbox-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 81; }
+.lightbox-prev { left: 10px; }
+.lightbox-next { right: 10px; }
+@media (max-width: 640px) { .lightbox-nav { display: none; } }

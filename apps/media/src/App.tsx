@@ -4,6 +4,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 
 import { AppShell, Button, EmptyState, Modal, Skeleton } from "@cloud-at-home/ui";
 import { clearWatchHistory, getMediaItem, getSeriesEpisodes, getSession, imageUrl, loadHome, login, logout, removeWatchHistoryItem, search, type MediaItem, type Session } from "./api";
+import { CanadianTvRatingMark } from "./CanadianTvRatingMark";
+import { MpaRatingMark, type MpaRatingLabel } from "./MpaRatingMark";
 import { Player } from "./Player";
 import { createMediaList, MAX_LIST_NAME_LENGTH, normalizeListName, toggleListItem, validPromotedListId, type MediaList } from "./lists";
 import { mobileHeaderScrollIntent } from "./mobileHeader";
@@ -33,7 +35,7 @@ export default function App() {
   const [libraryView, setLibraryView] = useState<LibraryView>("home");
   const [favorites, setFavorites] = useState<MediaItem[]>(() => readFavorites());
   const [lists, setLists] = useState<MediaList[]>(() => readLists());
-  const [promotedListId, setPromotedListId] = useState<string | null>(() => localStorage.getItem("cloud-media-promoted-list"));
+  const [promotedListId, setPromotedListId] = useState<string | null>(() => localStorage.getItem("video-promoted-list"));
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [listsOpen, setListsOpen] = useState(false);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
@@ -52,13 +54,13 @@ export default function App() {
     const timer = setTimeout(() => void search(session.user.id, query).then(setResults), 220);
     return () => clearTimeout(timer);
   }, [query, session]);
-  useEffect(() => { localStorage.setItem("cloud-media-favorites", JSON.stringify(favorites)); }, [favorites]);
-  useEffect(() => { localStorage.setItem("cloud-media-lists", JSON.stringify(lists)); }, [lists]);
+  useEffect(() => { localStorage.setItem("video-favorites", JSON.stringify(favorites)); }, [favorites]);
+  useEffect(() => { localStorage.setItem("video-lists", JSON.stringify(lists)); }, [lists]);
   useEffect(() => {
     const valid = validPromotedListId(lists, promotedListId);
     if (valid !== promotedListId) { setPromotedListId(valid); return; }
-    if (valid) localStorage.setItem("cloud-media-promoted-list", valid);
-    else localStorage.removeItem("cloud-media-promoted-list");
+    if (valid) localStorage.setItem("video-promoted-list", valid);
+    else localStorage.removeItem("video-promoted-list");
   }, [lists, promotedListId]);
   useEffect(() => {
     if (!home) return;
@@ -206,7 +208,7 @@ export default function App() {
 
   if (sessionError) return <AppShell kind="media" brand="Video"><section className="media-page media-error-state"><EmptyState title="Video is temporarily unavailable" body={sessionError} icon={<Film />} /><Button variant="secondary" onClick={() => void recoverSession()}>Retry</Button></section></AppShell>;
   if (session === undefined) return <div className="boot-screen" aria-label="Loading Video" />;
-  if (!session) return <AppShell kind="media" brand="Video"><CloudMediaLogin onSubmit={signIn} loading={busy} error={loginError} /></AppShell>;
+  if (!session) return <AppShell kind="media" brand="Video"><VideoLogin onSubmit={signIn} loading={busy} error={loginError} /></AppShell>;
 
   return (
     <AppShell
@@ -215,7 +217,7 @@ export default function App() {
       headerCollapsed={headerCollapsed}
       headerAutoHidden={mobileHeaderHidden}
       navigation={
-        <><CloudMediaMenu
+        <><VideoMenu
           open={menuOpen}
           username={session.user.name}
           onToggle={() => setMenuOpen((current) => !current)}
@@ -243,7 +245,7 @@ export default function App() {
         </div>{searchFocused && query.trim() && results.length > 0 && <div className="media-search-suggestions" role="listbox" aria-label="Search suggestions">{results.slice(0, 6).map((item) => <button key={item.Id} role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSelected(item); setQuery(""); setSearchFocused(false); setMobileSearchOpen(false); searchRef.current?.blur(); }}><img src={imageUrl(item, "Primary", 100)} alt="" /><span><strong>{item.SeriesName ?? item.Name}</strong><small>{item.SeriesName ? item.Name : [item.ProductionYear, item.Type === "Series" ? "TV" : item.Type].filter(Boolean).join(" · ")}</small></span></button>)}</div>}</div><button className="icon-button media-home-action" aria-label="Home" title="Home" onClick={() => navigateTo()}><House size={17} /></button><WatchlistDropdown lists={lists} activeListId={libraryView === "list" ? activeListId : null} onOpenList={showList} onManageLists={() => setListsOpen(true)} /><button className="icon-button media-cinema-action" aria-label="Cinema mode" title="Cinema mode" onClick={() => { setMenuOpen(false); setMobileSearchOpen(false); setHeaderCollapsed(true); }}><Clapperboard size={17} /></button></>
       }
     >
-      {headerCollapsed && !playing && <div className="cloud-media-header-reveal-zone" onMouseEnter={() => setHeaderCollapsed(false)}><button className="cloud-media-header-restore" aria-label="Restore Video header" onClick={() => setHeaderCollapsed(false)}><ChevronDown size={17} /><span>Show header</span></button></div>}
+      {headerCollapsed && !playing && <div className="video-header-reveal-zone" onMouseEnter={() => setHeaderCollapsed(false)}><button className="video-header-restore" aria-label="Restore Video header" onClick={() => setHeaderCollapsed(false)}><ChevronDown size={17} /><span>Show header</span></button></div>}
       {query ? (
         <section className="media-page search-page"><div className="section-heading"><div><span className="eyebrow">Search</span><h1>{results.length ? `Results for “${query}”` : "No matches yet"}</h1></div></div><MediaGrid items={results} onSelect={setSelected} onPlay={(item) => void playFromCard(item)} /></section>
       ) : libraryView === "favorites" ? (
@@ -306,7 +308,7 @@ function WatchlistDropdown({
   }, [open]);
   const activeInList = lists.some((list) => list.id === activeListId);
   return (
-    <div className="cloud-media-menu watchlist-dropdown" ref={shellRef}>
+    <div className="video-menu watchlist-dropdown" ref={shellRef}>
       <button
         className={`icon-button watchlist-trigger ${activeInList ? "active" : ""}`}
         aria-label="Watchlists"
@@ -319,7 +321,7 @@ function WatchlistDropdown({
       </button>
       <AnimatePresence>
         {open && (
-          <motion.div className="cloud-media-menu-popover watchlist-popover" initial={{ opacity: 0, y: -8, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -5, scale: .98 }} transition={{ duration: .16, ease: [0.22, 1, 0.36, 1] }}>
+          <motion.div className="video-menu-popover watchlist-popover" initial={{ opacity: 0, y: -8, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -5, scale: .98 }} transition={{ duration: .16, ease: [0.22, 1, 0.36, 1] }}>
             <span>Watchlists</span>
             {lists.length === 0
               ? <p className="watchlist-empty">No lists yet. Create one to keep track of what you want to watch.</p>
@@ -328,7 +330,7 @@ function WatchlistDropdown({
                   <ListPlus size={16} /><span className="menu-list-name" title={list.name}>{list.name}</span>{list.items.length > 0 && <small>{list.items.length}</small>}
                 </button>
               ))}
-            <div className="cloud-media-menu-rule" />
+            <div className="video-menu-rule" />
             <button className="watchlist-manage" onClick={() => { onManageLists(); setOpen(false); }}><Plus size={16} />{lists.length ? "Manage lists" : "Create a list"}</button>
           </motion.div>
         )}
@@ -337,7 +339,7 @@ function WatchlistDropdown({
   );
 }
 
-function CloudMediaMenu({
+function VideoMenu({
   open,
   username,
   onToggle,
@@ -385,26 +387,26 @@ function CloudMediaMenu({
     { name: "Shows", icon: <Tv size={16} />, section: "shows" },
   ];
   return (
-    <div className="cloud-media-menu">
-      <button className="cloud-media-menu-trigger" aria-label={open ? "Close Video menu" : "Open Video menu"} aria-expanded={open} onClick={onToggle}><Menu size={20} /></button>
+    <div className="video-menu">
+      <button className="video-menu-trigger" aria-label={open ? "Close Video menu" : "Open Video menu"} aria-expanded={open} onClick={onToggle}><Menu size={20} /></button>
       <AnimatePresence>
         {open && (
-          <motion.div className="cloud-media-menu-popover" initial={{ opacity: 0, y: -8, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -5, scale: .98 }}>
+          <motion.div className="video-menu-popover" initial={{ opacity: 0, y: -8, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -5, scale: .98 }}>
             <span>Browse Video</span>
             <button onClick={onSearch}><Search size={16} />Search library</button>
-            <button className="cloud-media-menu-favorites" onClick={onFavorites}><Heart size={16} />Favorites</button>
+            <button className="video-menu-favorites" onClick={onFavorites}><Heart size={16} />Favorites</button>
             {items.map((entry) => <button key={entry.name} onClick={() => onNavigate(entry.section)}>{entry.icon}{entry.name}</button>)}
-            <div className="cloud-media-menu-rule" />
+            <div className="video-menu-rule" />
             <span>Lists</span>
             {lists.map((list) => <button key={list.id} onClick={() => onList(list.id)}><ListPlus size={16} /><span className="menu-list-name" title={list.name}>{list.name}</span>{list.items.length > 0 && <small>{list.items.length}</small>}</button>)}
             <button onClick={onManageLists}><Plus size={16} />{lists.length ? "Manage lists" : "Create a list"}</button>
-            <div className="cloud-media-menu-rule" />
+            <div className="video-menu-rule" />
             <span>Tools</span>
             <button onClick={onRandom}><Shuffle size={16} />Surprise me</button>
             <button onClick={onRefresh}><RefreshCw size={16} />Refresh home</button>
-            <button className={`cloud-media-clear-history ${clearState === "confirm" || clearState === "error" ? "confirm" : ""}`} disabled={clearState === "clearing" || clearState === "cleared"} onClick={() => void handleClearHistory()}><Trash2 size={16} />{clearLabel}</button>
-            <button className="cloud-media-menu-mobile-signout" onClick={onSignOut}><LogOut size={16} />Sign out</button>
-            <div className="cloud-media-menu-footer">
+            <button className={`video-clear-history ${clearState === "confirm" || clearState === "error" ? "confirm" : ""}`} disabled={clearState === "clearing" || clearState === "cleared"} onClick={() => void handleClearHistory()}><Trash2 size={16} />{clearLabel}</button>
+            <button className="video-menu-mobile-signout" onClick={onSignOut}><LogOut size={16} />Sign out</button>
+            <div className="video-menu-footer">
               <span>Signed in as {username}</span>
             </div>
           </motion.div>
@@ -414,19 +416,19 @@ function CloudMediaMenu({
   );
 }
 
-function CloudMediaLogin({ onSubmit, loading, error }: { onSubmit: (username: string, password: string) => void; loading: boolean; error: string }) {
+function VideoLogin({ onSubmit, loading, error }: { onSubmit: (username: string, password: string) => void; loading: boolean; error: string }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   return (
-    <main className="cloud-media-login">
-      <div className="cloud-media-login-glow" />
+    <main className="video-login">
+      <div className="video-login-glow" />
       <form onSubmit={(event) => { event.preventDefault(); onSubmit(username.trim(), password); }}>
-        <span className="cloud-media-login-kicker">WELCOME BACK</span>
+        <span className="video-login-kicker">WELCOME BACK</span>
         <h1>Sign in to Video</h1>
         <p>Pick up where you left off, on your own profile.</p>
         <label><span>Profile</span><input autoFocus required autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Profile name" /></label>
         <label><span>Password <small>optional</small></span><input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" /></label>
-        {error && <div className="cloud-media-login-error">{error}</div>}
+        {error && <div className="video-login-error">{error}</div>}
         <button type="submit" disabled={loading || !username.trim()}>{loading ? "Signing in…" : "Sign in"}</button>
         <small>Profiles keep watch progress and history separate.</small>
       </form>
@@ -442,7 +444,7 @@ function Hero({ item, onPlay, onInfo }: { item: MediaItem; onPlay: (fromBeginnin
     <section className="hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(0,0,0,.93) 0%, rgba(0,0,0,.56) 43%, transparent 76%), linear-gradient(0deg, var(--bg) 0%, transparent 38%), url(${imageUrl(item, art, 1600)})` }}>
       <motion.div className="hero-copy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: .08 }}>
         <span className="eyebrow">{item.Type === "Series" ? "SERIES" : "NOW WATCHING"}</span>
-        <h1>{item.Name}</h1>
+        <h1 className={/^\d+$/.test(item.Name.trim()) ? "numeric-title" : undefined}>{item.Name}</h1>
         <div className="hero-meta">{item.ProductionYear && <span>{item.ProductionYear}</span>}{minutes > 0 && <span>{minutes} min</span>}</div>
         {item.Overview && <p>{item.Overview}</p>}
         <div className="hero-actions"><Button onClick={() => onPlay(false)}><Play size={18} fill="currentColor" /> {resumable ? "Resume" : "Play"}</Button>{resumable && <Button variant="secondary" onClick={() => onPlay(true)}><RotateCcw size={17} /> Play from beginning</Button>}<Button className="hero-more-info" variant="secondary" aria-label="More info" title="More info" onClick={onInfo}><Info size={20} /></Button></div>
@@ -555,7 +557,7 @@ function Details({ item, userId, favorite, lists, onToggleFavorite, onToggleList
         <div className={`details-art ${artLoaded ? "is-loaded" : ""}`} style={{ backgroundImage: `url(${imageUrl(item)})` }}><img className="details-art-image" src={imageUrl(item, art, 1300)} alt="" onLoad={() => setArtLoaded(true)} /><span className="details-art-shade" /><button className="details-close icon-button" aria-label="Close details" onClick={onClose}><X /></button></div>
         <div className="details-copy">
           <span className="eyebrow">{item.Type}</span>
-          <h1>{item.Name}</h1>
+          <h1 className={/^\d+$/.test(item.Name.trim()) ? "numeric-title" : undefined}>{item.Name}</h1>
           <div className="hero-meta">{item.Type === "Series" ? (seriesYearRange(item) && <span>{seriesYearRange(item)}</span>) : (item.ProductionYear && <span>{item.ProductionYear}</span>)}{item.Type === "Series" && item.ChildCount && item.ChildCount > 0 && <span>{item.ChildCount} {item.ChildCount === 1 ? "Season" : "Seasons"}</span>}{item.Type === "Series" && episodes.length > 0 && <span>{episodes.length} episodes</span>}{item.Type !== "Series" && minutes > 0 && <span>{minutes} min</span>}</div>
           <p>{item.Overview || "No synopsis available."}</p>
           <div className="details-actions">
@@ -671,14 +673,17 @@ function ScorePill({ kind, value, providerIds }: { kind: ScoreKind; value: strin
   const tooltipId = useId();
   const critic = kind === "critic";
   const source = scoreSource(kind, providerIds);
+  const scoreValue = critic && value.endsWith("%")
+    ? <>{value.slice(0, -1)}<span className="score-percent">%</span></>
+    : value;
   return (
     <span className={`${kind}-rating score-pill`} tabIndex={0} aria-describedby={tooltipId} aria-label={`${critic ? "Tomatometer" : "IMDb rating"} ${value}`}>
       {critic ? <TomatoMark /> : <i className="community-rating-star" aria-hidden="true">★</i>}
-      {value}
+      <span className="score-value">{scoreValue}</span>
       <span className="score-tooltip" id={tooltipId} role="tooltip">
         <span className="score-tooltip-heading">
           <strong>{critic ? "Tomatometer" : "IMDb"}</strong>
-          <b>{value}{!critic && <span className="score-denominator">/10</span>}</b>
+          <b>{scoreValue}{!critic && <span className="score-denominator">/10</span>}</b>
         </span>
         <small>{source.description}</small>
         {source.href && <a href={source.href} target="_blank" rel="noreferrer">View title on {critic ? "Rotten Tomatoes" : "Internet Movie Database"}<ExternalLink aria-hidden="true" /></a>}
@@ -791,6 +796,12 @@ function SearchGlyph({ size = 17 }: { size?: number }) {
 }
 
 function RatingBadgeLabel({ scheme, label }: { scheme: string; label: string }) {
+  if (scheme === "ca-tv" && (label === "14+" || label === "18+")) {
+    return <CanadianTvRatingMark label={label} />;
+  }
+  if (scheme === "us-film" && /^(G|PG|PG-13|R|NC-17)$/.test(label)) {
+    return <MpaRatingMark label={label as MpaRatingLabel} />;
+  }
   const accompaniment = scheme === "ca" && /^(14|18)A$/.exec(label);
   if (!accompaniment) return <>{label}</>;
   return <span className="rating-badge-content"><span className="rating-badge-base">{accompaniment[1]}</span><sup className="rating-badge-accompaniment">A</sup></span>;
@@ -807,7 +818,7 @@ function itemCanResume(item: MediaItem): boolean {
 
 function readFavorites(): MediaItem[] {
   try {
-    const saved = localStorage.getItem("cloud-media-favorites") ?? localStorage.getItem("cloud-media-my-list") ?? "[]";
+    const saved = localStorage.getItem("video-favorites") ?? localStorage.getItem("video-my-list") ?? "[]";
     const value = JSON.parse(saved);
     return Array.isArray(value) ? value : [];
   } catch {
@@ -817,7 +828,7 @@ function readFavorites(): MediaItem[] {
 
 function readLists(): MediaList[] {
   try {
-    const value = JSON.parse(localStorage.getItem("cloud-media-lists") ?? "[]");
+    const value = JSON.parse(localStorage.getItem("video-lists") ?? "[]");
     if (!Array.isArray(value)) return [];
     return value.filter((list): list is MediaList => Boolean(list && typeof list.id === "string" && typeof list.name === "string" && Array.isArray(list.items)))
       .map((list) => ({ ...list, name: normalizeListName(list.name) }))
@@ -826,6 +837,3 @@ function readLists(): MediaList[] {
     return [];
   }
 }
-
-
-

@@ -65,6 +65,26 @@ export function joinPath(parent: string, child: string): string {
   return `/${safe.join("/")}`;
 }
 
+type PathResource = { name: string; path?: string; url?: string };
+
+/** Prefer the path returned with a collection item over the folder currently open. */
+export function resourcePath(resource: PathResource, currentPath: string): string {
+  return resource.url || resource.path || joinPath(currentPath, resource.name);
+}
+
+export function parentPath(path: string): string {
+  const parts = path.replaceAll("\\", "/").split("/").filter(Boolean);
+  parts.pop();
+  return parts.length ? `/${parts.join("/")}` : "/";
+}
+
+/** Build destinations from the source path so virtual collections cannot move a file by accident. */
+export function mutationDestination(action: "rename" | "move" | "copy", source: string, value: string): string {
+  const name = source.split("/").filter(Boolean).pop();
+  if (!name) throw new Error("Source path must name a resource");
+  return action === "rename" ? joinPath(parentPath(source), value) : joinPath(value, name);
+}
+
 export function togglePath(paths: string[], path: string): string[] {
   return paths.includes(path) ? paths.filter((entry) => entry !== path) : [...paths, path];
 }
@@ -98,4 +118,25 @@ export function editorModeFor(bytes: number): EditorMode {
   if (bytes <= 5 * 1024 * 1024) return "edit";
   if (bytes <= 50 * 1024 * 1024) return "read";
   return "download";
+}
+
+// ── the photos bridge ───────────────────────────────────────────────────────
+// Drive and Photos are two views over the same folder; these helpers are the
+// navigation glue. Root must match the Photos app's VITE_PHOTOS_ROOT.
+
+export const PHOTOS_ROOT: string =
+  ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_PHOTOS_ROOT || "photos")
+    .replace(/^\/+|\/+$/g, "");
+
+export function isUnderPhotosRoot(path: string): boolean {
+  const clean = path.replace(/^\/+/, "");
+  return clean === PHOTOS_ROOT || clean.startsWith(`${PHOTOS_ROOT}/`);
+}
+
+export function photosDeepLink(photosOrigin: string, path: string): string {
+  const clean = path.replace(/^\/+/, "");
+  const parts = clean.split("/");
+  const name = parts.pop() ?? "";
+  const album = parts.join("/");
+  return `${photosOrigin}/#/album/${encodeURIComponent(album)}?item=${encodeURIComponent(name)}`;
 }

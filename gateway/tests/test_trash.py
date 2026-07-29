@@ -12,7 +12,7 @@ def test_trash_entries_expire_after_thirty_days(tmp_path) -> None:
     entry = store.add(
         service_user="alice",
         original_path="/documents/report.pdf",
-        trash_path="/.cloud-home-trash/id/report.pdf",
+        trash_path="/.cloud-at-home-trash/id/report.pdf",
         size=42,
         now=now,
     )
@@ -28,7 +28,7 @@ def test_trash_entries_cannot_cross_users(tmp_path) -> None:
     entry = store.add(
         service_user="alice",
         original_path="/notes.txt",
-        trash_path="/.cloud-home-trash/id/notes.txt",
+        trash_path="/.cloud-at-home-trash/id/notes.txt",
         size=1,
     )
     assert store.get(entry.id, "bob") is None

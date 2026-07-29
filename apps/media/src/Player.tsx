@@ -2,6 +2,7 @@ import Hls from "hls.js";
 import {
   Airplay,
   Captions,
+  CaptionsOff,
   Expand,
   ListVideo,
   Pause,
@@ -10,6 +11,7 @@ import {
   RotateCw,
   Settings2,
   SlidersHorizontal,
+  Volume1,
   Volume2,
   VolumeX,
   X,
@@ -20,7 +22,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { Button, Modal } from "@cloud-at-home/ui";
 import { createStreamTicket, getPlaybackInfo, getSeriesEpisodes, imageUrl, reportPlayback, subtitleTrackUrl, ticketedStreamUrl, type MediaItem, type PlaybackInfo, type Session } from "./api";
-import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionLineHeight, captionPrefsVersion, captionVerticalOffset, formatPlaybackStats, fullscreenStrategy, mediaYearLabel, migrateCaptionDefaults, pauseCinemaDelays, pauseSynopsisDurationSeconds, playbackStartPosition, playerKeyboardAction, playerTitleOwners, prefersViewportFullscreen, shouldArmTitleTimer, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, titleDisplayDurationMs, trickplayFrame, type TrickplayInfo } from "./playback";
+import { paintRollingTime } from "./rollingTime";
+import { activeCaptionPreset, activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionLineHeight, captionPrefsVersion, captionSizeFlash, captionSizePreset, captionVerticalOffset, classifyStat, formatPlaybackStats, fullscreenStrategy, mediaYearLabel, migrateCaptionDefaults, pauseCinemaDelays, pauseSynopsisDurationSeconds, playbackStartPosition, playerKeyboardAction, playerTitleOwners, prefersViewportFullscreen, seekTime, shortcutFlash, shortcutFlashDurationMs, shouldArmTitleTimer, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, titleDisplayDurationMs, trickplayFrame, type ShortcutFlash, type TrickplayInfo } from "./playback";
 
 type SafariVideo = HTMLVideoElement & {
   webkitShowPlaybackTargetPicker?: () => void;
@@ -53,8 +56,8 @@ type CaptionPrefs = {
   backgroundOpacity: number;
 };
 
-const defaultCaptions: CaptionPrefs = { fontSize: 85, fontWeight: 600, lineHeight: 1.52, letterSpacing: 0, phonePortraitOffset: 25, portraitOffset: 12, landscapeOffset: 8, backgroundOpacity: 0.5 };
-const playbackPrefsKey = "cloud-media-playback";
+const defaultCaptions: CaptionPrefs = { fontSize: 85, fontWeight: 600, lineHeight: 1.49, letterSpacing: 0, phonePortraitOffset: 25, portraitOffset: 12, landscapeOffset: 8, backgroundOpacity: 0.5 };
+const playbackPrefsKey = "video-playback";
 const pauseTitleHandoffMs = 500;
 type PlaybackPrefs = { muted: boolean; volume: number; rate?: number; fit?: "contain" | "cover"; subtitleLanguage?: string; subtitlesOff?: boolean };
 
@@ -110,7 +113,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const [seriesEpisodes, setSeriesEpisodes] = useState<MediaItem[]>([]);
   const [captions, setCaptions] = useState<CaptionPrefs>(() => {
     try {
-      const saved = migrateCaptionDefaults(JSON.parse(localStorage.getItem("cloud-media-captions") ?? "{}"));
+      const saved = migrateCaptionDefaults(JSON.parse(localStorage.getItem("video-captions") ?? "{}"));
       const legacyOffset = saved.offset == null ? undefined : captionVerticalOffset(saved.offset);
       return {
         ...defaultCaptions,
@@ -141,6 +144,15 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   const [seekTarget, setSeekTarget] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // Keyed so repeat presses of the same key restart the animation instead of
+  // leaving the first badge sitting there unchanged.
+  const [flash, setFlash] = useState<(ShortcutFlash & { key: number }) | null>(null);
+  const flashKeyRef = useRef(0);
+  const showFlash = useCallback((next: ShortcutFlash | null) => {
+    if (!next) return;
+    flashKeyRef.current += 1;
+    setFlash({ ...next, key: flashKeyRef.current });
+  }, []);
   const [statsOpen, setStatsOpen] = useState(false);
   const [viewportFullscreen, setViewportFullscreen] = useState(false);
   const [, setStatsEpoch] = useState(0);
@@ -203,6 +215,11 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     const timer = window.setTimeout(() => setNotice(""), airPlayNoticeDurationMs);
     return () => window.clearTimeout(timer);
   }, [notice]);
+  useEffect(() => {
+    if (!flash) return;
+    const timer = window.setTimeout(() => setFlash(null), shortcutFlashDurationMs);
+    return () => window.clearTimeout(timer);
+  }, [flash]);
   useEffect(() => () => {
     if (transportTimerRef.current !== null) window.clearTimeout(transportTimerRef.current);
     if (controlsTimerRef.current !== null) window.clearTimeout(controlsTimerRef.current);
@@ -258,7 +275,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
 
   useEffect(() => {
     const supportsHevc = Boolean(videoRef.current?.canPlayType('video/mp4; codecs="hvc1"'));
-    getPlaybackInfo(item.Id, session.user.id, supportsHevc).then(setInfo).catch((reason) => setError(String(reason.message ?? reason)));
+    getPlaybackInfo(item.Id, supportsHevc).then(setInfo).catch((reason) => setError(String(reason.message ?? reason)));
   }, [item.Id, session.user.id]);
 
   useEffect(() => {
@@ -387,7 +404,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       if (fullscreenIntentRef.current || document.fullscreenElement || fullscreenDocument.webkitFullscreenElement) return;
       if (!video || !shouldAutoPictureInPicture(video.paused, video.ended, video.readyState)) return;
       try {
-        if (video.webkitSupportsPresentationMode?.("picture-in-picture")) {
+      if (!isAppleTouchDevice() && video.webkitSupportsPresentationMode?.("picture-in-picture")) {
           if (video.webkitPresentationMode !== "picture-in-picture") video.webkitSetPresentationMode?.("picture-in-picture");
           return;
         }
@@ -444,14 +461,15 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
         if (!video.paused) titleTimerRef.current = window.setTimeout(() => setTitleLingering(false), titleDisplayDurationMs);
       }
 
-      if (shortcut === "seek-back") video.currentTime = Math.max(0, video.currentTime - 10);
-      else if (shortcut === "seek-forward") video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
+      if (shortcut === "seek-back") seekBy(-10, video);
+      else if (shortcut === "seek-forward") seekBy(10, video);
       else if (shortcut === "toggle") video.paused ? void startVideoPlayback(video) : pauseVideoPlayback(video);
       else if (shortcut === "fullscreen") toggleFullscreenRef.current();
       else if (shortcut === "mute") video.muted = !video.muted;
       else if (shortcut === "volume-up") changeVolume(volumeRef.current + 0.05);
       else if (shortcut === "volume-down") changeVolume(volumeRef.current - 0.05);
       else if (shortcut === "captions") {
+        // No subtitle tracks: nothing toggles, so nothing should flash either.
         if (!subtitles.length) return;
         if (captionsActive) void chooseSubtitle(null);
         else {
@@ -461,7 +479,24 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       }
       else if (ownsFontKey) {
         const step = (key === "+" || key === "=") ? 5 : -5;
-        setCaptions((current) => ({ ...current, fontSize: captionFontSize(current.fontSize + step) }));
+        setCaptions((current) => {
+          const fontSize = captionFontSize(current.fontSize + step);
+          showFlash(captionSizeFlash(fontSize));
+          return { ...current, fontSize };
+        });
+      }
+
+      // Flash reports the state the shortcut PRODUCED, so it is read after the
+      // branch above ran. `muted`/`paused` are already settled on the element;
+      // captions flip asynchronously via chooseSubtitle, so that one is
+      // predicted from the toggle rather than re-read.
+      if (shortcut) {
+        showFlash(shortcutFlash(shortcut, {
+          paused: video.paused,
+          muted: video.muted,
+          volume: video.muted ? 0 : volumeRef.current,
+          captionsActive: shortcut === "captions" ? !captionsActive : captionsActive,
+        }));
       }
       else if (ownsDigit) {
         const seconds = (video.duration || duration) * (Number(key) / 10);
@@ -475,7 +510,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
   }, [settings, subtitleIndex, subtitles, duration]);
 
   useEffect(() => {
-    localStorage.setItem("cloud-media-captions", JSON.stringify({ ...captions, version: captionPrefsVersion }));
+    localStorage.setItem("video-captions", JSON.stringify({ ...captions, version: captionPrefsVersion }));
   }, [captions]);
 
   useEffect(() => {
@@ -726,6 +761,16 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
     setSeekTarget(null);
   }
 
+  function seekBy(delta: number, video = videoRef.current) {
+    if (!video) return;
+    const target = seekTime(video.currentTime, delta, video.duration);
+    video.currentTime = target;
+    positionRef.current = target;
+    setPosition(target);
+    seekTargetRef.current = null;
+    setSeekTarget(null);
+  }
+
   function changeSeekTarget(target: number) {
     seekTargetRef.current = target;
     setSeekTarget(target);
@@ -911,7 +956,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       <video
         ref={videoRef}
         className="player-video"
-        style={{ objectFit: videoFit }}
+        style={{ objectFit: videoFit, WebkitUserSelect: "none", userSelect: "none" }}
         playsInline
         autoPlay
         x-webkit-airplay="allow"
@@ -931,7 +976,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
         onSeeked={() => { positionRef.current = videoRef.current?.currentTime ?? positionRef.current; if (videoRef.current?.paused) setPauseFrame(captureVideoFrame(videoRef.current)); syncSubtitleCue(); report(true); }}
         onClick={(event) => event.currentTarget.paused ? void startVideoPlayback(event.currentTarget) : pauseVideoPlayback(event.currentTarget)}
       />
-      {!playing && pauseFrame && <img className="player-paused-frame" src={pauseFrame} alt="" aria-hidden="true" style={{ objectFit: videoFit }} />}
+      {!playing && pauseFrame && <img className="player-paused-frame" src={pauseFrame} alt="" aria-hidden="true" draggable={false} style={{ objectFit: videoFit, WebkitUserSelect: "none", userSelect: "none" }} />}
       <AnimatePresence>
         {titleOwners.pause && (
           <motion.div className="pause-cinema" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .65, ease: [0.22, 1, 0.36, 1] }}>
@@ -939,7 +984,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
             <div className="pause-cinema-shade" />
             <div className="pause-cinema-copy">
               <div className="pause-cinema-heading">
-                <motion.h1 initial={{ opacity: 0, x: reduceMotion ? 0 : -22 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: pauseDelays.title, duration: reduceMotion ? .22 : .58, ease: [0.22, 1, 0.36, 1] }}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <motion.small initial={{ opacity: 0, x: reduceMotion ? 0 : -18, scale: reduceMotion ? 1 : .96 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ delay: pauseDelays.year, duration: reduceMotion ? .22 : .56, ease: [0.22, 1, 0.36, 1] }}>{yearLabel}</motion.small>}</span></motion.h1>
+                <motion.h1 className={/^\d+$/.test(pauseTitle.trim()) ? "numeric-title" : undefined} initial={{ opacity: 0, x: reduceMotion ? 0 : -22 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: pauseDelays.title, duration: reduceMotion ? .22 : .58, ease: [0.22, 1, 0.36, 1] }}>{pauseTitleLead}<span className="pause-title-tail">{pauseTitleTail}{yearLabel && <motion.small initial={{ opacity: 0, x: reduceMotion ? 0 : -18, scale: reduceMotion ? 1 : .96 }} animate={{ opacity: 1, x: 0, scale: 1 }} transition={{ delay: pauseDelays.year, duration: reduceMotion ? .22 : .56, ease: [0.22, 1, 0.36, 1] }}>{yearLabel}</motion.small>}</span></motion.h1>
               </div>
               {item.SeriesName && <motion.h2 initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: pauseDelays.episode, duration: reduceMotion ? .22 : .56, ease: [0.22, 1, 0.36, 1] }}>{item.Name}</motion.h2>}
               {item.Overview && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: pauseDelays.synopsis, duration: reduceMotion ? .22 : pauseSynopsisDurationSeconds, ease: [0.22, 1, 0.36, 1] }}>{item.Overview}</motion.p>}
@@ -961,7 +1006,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
           <motion.div className="player-controls" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <div className="player-top"><button className="player-icon" aria-label="Close player" onClick={closePlayer}><X /></button></div>
             <AnimatePresence>
-              {!pauseCinema && !settings && transportHover && (
+              {!pauseCinema && !settings && transportHover && !flash && (
                 <motion.div
                   className="player-center"
                   initial={{ opacity: 0 }}
@@ -976,7 +1021,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
                     exit={{ opacity: 0, x: reduceMotion ? 0 : 14, scale: reduceMotion ? 1 : .92 }}
                     transition={{ duration: reduceMotion ? .1 : .24, ease: [0.22, 1, 0.36, 1] }}
                   >
-                    <button className="seek-skip" aria-label="Rewind 10 seconds" onClick={() => { if (videoRef.current) videoRef.current.currentTime -= 10; }}><RotateCcw /><span>10</span></button>
+                    <button className="seek-skip" aria-label="Rewind 10 seconds" onClick={() => seekBy(-10)}><RotateCcw /><span>10</span></button>
                   </motion.div>
                   <motion.div
                     className="player-center-control"
@@ -994,7 +1039,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
                     exit={{ opacity: 0, x: reduceMotion ? 0 : -14, scale: reduceMotion ? 1 : .92 }}
                     transition={{ duration: reduceMotion ? .1 : .24, ease: [0.22, 1, 0.36, 1] }}
                   >
-                    <button className="seek-skip" aria-label="Forward 10 seconds" onClick={() => { if (videoRef.current) videoRef.current.currentTime += 10; }}><RotateCw /><span>10</span></button>
+                    <button className="seek-skip" aria-label="Forward 10 seconds" onClick={() => seekBy(10)}><RotateCw /><span>10</span></button>
                   </motion.div>
                 </motion.div>
               )}
@@ -1028,7 +1073,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
                     <output>{Math.round((muted ? 0 : volume) * 100)}%</output>
                   </div>
                 </div>
-                <span className="timecode"><span>{formatTime(position)}</span><span className="timecode-total"> / {formatTime(duration)}</span></span>
+                <span className="timecode"><RollingTimecode video={videoRef.current} playing={playing} position={position} /><span className="timecode-total"> / {formatTime(duration)}</span></span>
                 <span className="player-spacer" />
                 {item.SeriesId && <button className="player-icon" aria-label="Choose episode" onClick={() => setSettings("episodes")}><ListVideo /></button>}
                 {subtitles.length > 0 && <button className="player-icon" aria-label="Subtitle settings" onClick={() => setSettings("captions")}><Captions /></button>}
@@ -1042,14 +1087,38 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
       </AnimatePresence>
       {error && <div className="player-error">{error}</div>}
       {notice && <div className="player-error player-notice" role="status">{notice}</div>}
+      <AnimatePresence>
+        {flash && (
+          <motion.div
+            key={flash.key}
+            className="shortcut-flash"
+            aria-hidden="true"
+            initial={{ opacity: 0, scale: reduceMotion ? 1 : .82 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: reduceMotion ? 1 : 1.12 }}
+            transition={{ duration: reduceMotion ? .12 : .22, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {flash.icon === "play" && <Play />}
+            {flash.icon === "pause" && <Pause />}
+            {flash.icon === "forward" && <RotateCw />}
+            {flash.icon === "backward" && <RotateCcw />}
+            {flash.icon === "volume" && <Volume2 />}
+            {flash.icon === "volume-low" && <Volume1 />}
+            {flash.icon === "volume-muted" && <VolumeX />}
+            {flash.icon === "captions" && <Captions />}
+            {flash.icon === "captions-off" && <CaptionsOff />}
+            {flash.label && <span>{flash.label}</span>}
+          </motion.div>
+        )}
+      </AnimatePresence>
       <Modal open={settings === "captions"} title="Subtitles" onClose={() => setSettings(null)}>
         <div className="player-settings player-settings-polished">
           <header className="settings-heading"><Captions /><div><strong>Caption appearance</strong><span>Changes save automatically on this device</span></div></header>
           <div className="settings-section">
             <label className="settings-select"><span>Subtitle track</span><select value={subtitleIndex ?? ""} onChange={(event) => chooseSubtitle(event.target.value === "" ? null : Number(event.target.value))}><option value="">Off</option>{subtitles.map((stream) => <option key={stream.Index} value={stream.Index}>{subtitleTrackLabel(stream)}</option>)}</select></label>
           </div>
-          <div className="caption-preview"><span style={{ fontSize: `${Math.max(13, captions.fontSize * .19)}px`, fontWeight: captions.fontWeight, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px`, background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>Subtitle preview</span></div>
-          <section className="settings-group"><h3>Text</h3><div className="settings-section settings-sliders">
+          <div className={`caption-preview${cue ? " caption-preview-live" : ""}`}><span style={{ fontSize: `${Math.max(13, captions.fontSize * .19)}px`, fontWeight: captions.fontWeight, lineHeight: captions.lineHeight, letterSpacing: `${captions.letterSpacing}px`, background: `rgba(0,0,0,${captions.backgroundOpacity})` }}>{cue || "Subtitle preview"}</span></div>
+          <section className="settings-group"><h3>Text</h3><div className="settings-presets" role="group" aria-label="Text size presets">{([["small", "Small"], ["default", "Default"], ["large", "Large"]] as const).map(([key, name]) => <button key={key} type="button" className={activeCaptionPreset(captions.fontSize) === key ? "active" : ""} onClick={() => setCaptions({ ...captions, fontSize: captionSizePreset(key) })}>{name}</button>)}</div><div className="settings-section settings-sliders">
             <label><span>Text size <b>{captions.fontSize}%</b></span><input type="range" min="0" max="200" value={captions.fontSize} onChange={(event) => setCaptions({ ...captions, fontSize: captionFontSize(Number(event.target.value)) })} /></label>
             <label><span>Font weight <b>{captions.fontWeight}</b></span><input type="range" min="300" max="800" step="100" value={captions.fontWeight} onChange={(event) => setCaptions({ ...captions, fontWeight: Number(event.target.value) })} /></label>
             <label><span>Line height <b>{captions.lineHeight.toFixed(2)}</b></span><input type="range" min="1.45" max="2" step="0.01" value={captions.lineHeight} onChange={(event) => setCaptions({ ...captions, lineHeight: captionLineHeight(Number(event.target.value)) })} /></label>
@@ -1069,7 +1138,7 @@ export function Player({ item, session, fromBeginning = false, onPlayEpisode, on
           <section className="settings-group"><h3>Picture</h3><div className="settings-choice"><span>Fit</span><div><button className={videoFit === "contain" ? "active" : ""} onClick={() => setVideoFit("contain")}>Fit</button><button className={videoFit === "cover" ? "active" : ""} onClick={() => setVideoFit("cover")}>Fill</button></div></div></section>
           <section className="settings-group"><h3>Audio</h3><label><span>Volume <b>{Math.round((muted ? 0 : volume) * 100)}%</b></span><input aria-label="Volume, up to 200 percent" type="range" min="0" max="2" step="0.01" value={muted ? 0 : volume} onChange={(event) => changeVolume(Number(event.target.value))} /></label></section>
           <section className="settings-group"><h3>Diagnostics</h3><button className="stats-toggle" onClick={() => setStatsOpen((open) => !open)} aria-expanded={statsOpen}>Stats for nerds <span>{statsOpen ? "Hide" : "Show"}</span></button>
-          {statsOpen && <div className="stats-panel">{playbackStats.map(([label, value]) => <div key={label}><span>{label}</span><strong title={value}>{value}</strong></div>)}</div>}</section>
+          {statsOpen && <div className="stats-panel">{playbackStats.map(([label, value]) => <div key={label} data-severity={classifyStat(label, value)}><span>{label}</span><strong title={value}>{value}</strong></div>)}</div>}</section>
           <div className="settings-actions"><Button variant="secondary" onClick={() => setSettings(null)}>Done</Button></div>
         </div>
       </Modal>
@@ -1137,6 +1206,40 @@ function SeekThumbnail({
       }}
     />
   );
+}
+
+// Music app's rolling play clock, movie-shaped (H:MM:SS once past the hour).
+// The digits roll on a rAF loop reading the video element directly — driving
+// them off `timeupdate` (4–66Hz, irregular) landed each whole-second roll at
+// a different sub-second phase and read as jittery. The rAF runs only while
+// playing; the `position` prop keeps
+// paused seeks painted. The span's inner DOM is owned by paintRollingTime,
+// so React renders it once and never reconciles the mid-roll markup.
+function RollingTimecode({ video, playing, position }: { video: HTMLVideoElement | null; playing: boolean; position: number }) {
+  const hostRef = useRef<HTMLSpanElement>(null);
+  const lastSecondRef = useRef(-1);
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !playing) return;
+    let frame = 0;
+    const tick = () => {
+      frame = requestAnimationFrame(tick);
+      const second = Math.floor(video?.currentTime ?? 0);
+      if (second === lastSecondRef.current) return;
+      lastSecondRef.current = second;
+      paintRollingTime(host, formatTime(second));
+    };
+    tick();
+    return () => cancelAnimationFrame(frame);
+  }, [video, playing]);
+  useEffect(() => {
+    // paused (or first mount): settle to the seek/rest value without a loop
+    const host = hostRef.current;
+    if (!host || playing) return;
+    lastSecondRef.current = Math.floor(position);
+    paintRollingTime(host, formatTime(position));
+  }, [playing, position]);
+  return <span className="timecode-current" ref={hostRef} />;
 }
 
 function formatTime(value: number): string {

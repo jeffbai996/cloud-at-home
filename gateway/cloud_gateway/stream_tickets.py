@@ -25,7 +25,7 @@ def _hash(value: str) -> str:
 @dataclass(frozen=True)
 class StreamTicket:
     id: str
-    token: str
+    session_id: str
     item_id: str
     expires_at: datetime
 
@@ -38,18 +38,20 @@ class StreamTicketStore:
     def create(
         self,
         *,
-        token: str,
+        session_id: str,
         item_id: str,
         now: datetime | None = None,
     ) -> StreamTicket:
         now = now or _utcnow()
         ticket_id = secrets.token_urlsafe(32)
-        result = StreamTicket(ticket_id, token, item_id, now + timedelta(hours=6))
+        result = StreamTicket(ticket_id, session_id, item_id, now + timedelta(hours=6))
         with self.database.connect() as connection:
             connection.execute(
                 "INSERT INTO stream_tickets VALUES (?, ?, ?, ?, ?)",
                 (
-                    _hash(ticket_id), self.vault.encrypt(token), item_id,
+                    # This legacy column now holds an encrypted gateway session
+                    # id. Existing tickets expire naturally after deployment.
+                    _hash(ticket_id), self.vault.encrypt(session_id), item_id,
                     result.expires_at.isoformat(), now.isoformat(),
                 ),
             )
@@ -77,10 +79,10 @@ class StreamTicketStore:
                 connection.execute("DELETE FROM stream_tickets WHERE id_hash = ?", (_hash(ticket_id),))
                 return None
         try:
-            token = self.vault.decrypt(row["token_ciphertext"])
+            session_id = self.vault.decrypt(row["token_ciphertext"])
         except InvalidToken:
             return None
-        return StreamTicket(ticket_id, token, item_id, expires_at)
+        return StreamTicket(ticket_id, session_id, item_id, expires_at)
 
 
 def rewrite_hls_playlist(playlist: str, *, upstream_path: str, public_prefix: str) -> str:

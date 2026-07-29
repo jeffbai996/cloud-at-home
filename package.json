@@ -1,7 +1,10 @@
 {
   "name": "cloud-at-home",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
+  "engines": {
+    "node": ">=22.12 <23"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -9,6 +12,7 @@
   "scripts": {
     "dev:media": "npm run dev -w @cloud-at-home/media",
     "dev:files": "npm run dev -w @cloud-at-home/files",
+    "dev:photos": "npm run dev -w @cloud-at-home/photos",
     "build": "npm run build -ws --if-present",
     "check:public": "bash scripts/check-public-safety.sh",
     "test": "npm run check:public && npm run test -ws --if-present",
@@ -21,13 +25,16 @@
     "@types/sanitize-html": "^2.16.0",
     "@playwright/test": "^1.54.1",
     "@vitejs/plugin-react": "^4.6.0",
-    "dompurify": "^3.4.11",
+    "dompurify": "^3.4.12",
     "jsdom": "^26.1.0",
     "typescript": "^5.8.3",
     "vite": "^7.0.4",
     "vitest": "^3.2.4"
   },
   "overrides": {
-    "dompurify": "$dompurify"
+    "dompurify": "$dompurify",
+    "monaco-editor": {
+      "dompurify": "$dompurify"
+    }
   }
 }

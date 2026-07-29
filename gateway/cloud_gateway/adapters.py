@@ -92,20 +92,20 @@ class ServiceAdapter:
 class JellyfinAdapter(ServiceAdapter):
     client_header = (
         'MediaBrowser Client="Cloud at Home", Device="Web", '
-        'DeviceId="cloud-home-web", Version="0.1.0"'
+        'DeviceId="cloud-at-home-web", Version="0.1.0"'
     )
 
     def login(self, username: str, password: str) -> AuthResult:
         login_header = (
             'MediaBrowser Client="Cloud at Home", Device="Web", '
-            f'DeviceId="cloud-home-web-{uuid.uuid4().hex}", Version="0.1.0"'
+            f'DeviceId="cloud-at-home-web-{uuid.uuid4().hex}", Version="0.1.0"'
         )
         try:
             response = requests.post(
                 f"{self.base_url}/Users/AuthenticateByName",
                 json={"Username": username, "Pw": password},
                 headers={"X-Emby-Authorization": login_header},
-                timeout=self.timeout[0],
+                timeout=self.timeout,
             )
         except requests.RequestException as exc:
             raise UpstreamError("Jellyfin is unavailable") from exc
@@ -124,7 +124,7 @@ class FileBrowserAdapter(ServiceAdapter):
             response = requests.post(
                 f"{self.base_url}/api/login",
                 json={"username": username, "password": password},
-                timeout=self.timeout[0],
+                timeout=self.timeout,
             )
         except requests.RequestException as exc:
             raise UpstreamError("FileBrowser is unavailable") from exc

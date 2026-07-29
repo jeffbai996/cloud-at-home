@@ -83,6 +83,16 @@
 .item-more { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
 .file-view-grid .item-more { position: absolute; top: 4px; right: 3px; opacity: 0; }
 .file-view-grid .file-item:hover .item-more { opacity: 1; }
+/* Dense grid (Grid3X3 toggle, persisted): tighter columns + smaller tiles so a
+   phone shows ~4 across instead of ~3 — the date line is dropped to keep tiles
+   short. */
+.file-view-dense { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 12px 8px; }
+.file-view-dense .file-item { min-height: 92px; padding: 7px 5px 8px; border-radius: 10px; }
+.file-view-dense .file-icon { width: 54px; height: 46px; }
+.file-view-dense .file-icon svg { width: 38px; height: 38px; }
+.file-view-dense .file-name { padding-top: 5px; }
+.file-view-dense .file-name strong { min-height: 2.6em; font-size: 10.5px; line-height: 1.3; }
+.file-view-dense .file-modified { display: none; }
 .file-view-list { display: grid; }
 .file-view-list .file-item { display: grid; grid-template-columns: 38px minmax(0, 1fr) 88px 34px; align-items: center; gap: 12px; min-height: 58px; padding: 6px 10px; border-bottom: 1px solid var(--line); border-radius: 9px; }
 .file-view-list .file-item:hover { background: var(--surface-2); }
@@ -228,7 +238,7 @@
   .app-files .topbar { gap: 7px; padding: 0 10px; }
   .app-files .brand { gap: 7px; }
   .app-files .brand > span:last-child { font-size: 0; }
-  .app-files .brand > span:last-child::after { content: "Cloud Home"; font-size: 14px; }
+  .app-files .brand > span:last-child::after { content: "Cloud at Home"; font-size: 14px; }
   .app-files .topbar-actions { min-width: 0; gap: 3px; }
   .app-files .file-search { position: relative; width: 38px; flex: 0 0 38px; padding: 0 10px; transition: width .18s ease, background .18s ease; }
   .app-files .file-search input { position: absolute; inset: 0; width: 100%; padding: 0 34px; opacity: 0; cursor: text; }
@@ -252,3 +262,12 @@
   .admin-delete-confirm > div, .admin-delete-confirm input { grid-column: 1 / -1; }
   .settings-list { grid-template-columns: 1fr; }
 }
+
+/* Multi-select: hover/select-mode check control and checked state */
+.file-item .item-check { position: absolute; z-index: 2; display: inline-flex; align-items: center; justify-content: center; padding: 3px; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--surface-2) 88%, transparent); color: var(--text); cursor: pointer; opacity: 0; transition: opacity .14s ease; }
+.file-view-grid .item-check { top: 4px; left: 3px; }
+.file-view-list .item-check { left: 12px; top: 50%; transform: translateY(-50%); }
+.file-item:hover .item-check, .file-item.checked .item-check, .file-item.select-mode .item-check { opacity: 1; }
+.file-item.checked .item-check { color: var(--blue); }
+.file-item.checked { border-color: color-mix(in srgb, var(--blue) 48%, transparent); background: rgba(32,140,255,.11); }
+.selection-count { align-self: center; margin-right: 2px; font-size: 12px; font-weight: 600; white-space: nowrap; }

@@ -9,6 +9,15 @@ describe("countryPresentation", () => {
     ["United States of America", { code: "US", label: "United States" }],
     ["Canada", { code: "CA", label: "Canada" }],
     ["United Kingdom", { code: "GB", label: "United Kingdom" }],
+    ["New Zealand", { code: "NZ", label: "New Zealand" }],
+    ["India", { code: "IN", label: "India" }],
+    ["Poland", { code: "PL", label: "Poland" }],
+    ["Finland", { code: "FI", label: "Finland" }],
+    ["The Netherlands", { code: "NL", label: "Netherlands" }],
+    ["Spain", { code: "ES", label: "Spain" }],
+    ["Czechia", { code: "CZ", label: "Czech Republic" }],
+    ["South Africa", { code: "ZA", label: "South Africa" }],
+    ["Argentina", { code: "AR", label: "Argentina" }],
   ])("normalizes %s for its expandable country pill", (value, expected) => {
     expect(countryPresentation(value)).toEqual(expected);
   });
@@ -76,7 +85,7 @@ describe("countryPills", () => {
     expect(countryPills(["Switzerland", "United States of America"])).toEqual({
       pills: [
         { code: "US", label: "United States" },
-        { code: undefined, label: "Switzerland" },
+        { code: "CH", label: "Switzerland" },
       ],
       overflow: [],
     });
@@ -96,7 +105,7 @@ describe("countryPills", () => {
     const result = countryPills(["Czech Republic", "France", "United States of America", "United Kingdom"]);
     expect(result.pills).toEqual([
       { code: "US", label: "United States" },
-      { code: undefined, label: "Czech Republic" },
+      { code: "CZ", label: "Czech Republic" },
     ]);
     expect(result.overflow).toEqual([
       { code: "FR", label: "France" },
@@ -159,5 +168,3 @@ describe("seriesCardMeta", () => {
     expect(seriesCardMeta({ ProductionYear: 2019 })).toBe("2019");
   });
 });
-
-

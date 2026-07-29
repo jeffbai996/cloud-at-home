@@ -49,8 +49,6 @@ const mpaGuidance: Record<string, RatingGuidance> = {
   NR: { name: "Not Rated", authority: "Motion Picture Association", description: "This title has not been assigned an MPAA rating.", authorityUrl: mpaUrl },
 };
 
-// The MPA's own letter colors (per the official rating cards): G green, PG
-// orange, PG-13 purple, R red, NC-17 blue. Beats a wall of gray.
 const mpaTones: Record<string, RatingBadge["tone"]> = {
   G: "green", PG: "orange", "PG-13": "purple", R: "red", "NC-17": "blue", NR: "mono",
 };

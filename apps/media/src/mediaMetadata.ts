@@ -33,7 +33,33 @@ const countries: Record<string, CountryPresentation> = {
   germany: { code: "DE", label: "Germany" },
   au: { code: "AU", label: "Australia" },
   australia: { code: "AU", label: "Australia" },
+  ch: { code: "CH", label: "Switzerland" },
+  switzerland: { code: "CH", label: "Switzerland" },
+  nz: { code: "NZ", label: "New Zealand" },
+  "new zealand": { code: "NZ", label: "New Zealand" },
+  in: { code: "IN", label: "India" },
+  india: { code: "IN", label: "India" },
+  pl: { code: "PL", label: "Poland" },
+  poland: { code: "PL", label: "Poland" },
+  fi: { code: "FI", label: "Finland" },
+  finland: { code: "FI", label: "Finland" },
+  nl: { code: "NL", label: "Netherlands" },
+  netherlands: { code: "NL", label: "Netherlands" },
+  "the netherlands": { code: "NL", label: "Netherlands" },
+  es: { code: "ES", label: "Spain" },
+  spain: { code: "ES", label: "Spain" },
+  cz: { code: "CZ", label: "Czech Republic" },
+  "czech republic": { code: "CZ", label: "Czech Republic" },
+  czechia: { code: "CZ", label: "Czech Republic" },
+  za: { code: "ZA", label: "South Africa" },
+  "south africa": { code: "ZA", label: "South Africa" },
+  ar: { code: "AR", label: "Argentina" },
+  argentina: { code: "AR", label: "Argentina" },
 };
+
+// Every code this map can emit must have a bundled flag SVG, or the pill
+// renders flagless next to flagged neighbors. countryFlags.test.ts enforces it.
+export const mappedCountryCodes: string[] = [...new Set(Object.values(countries).map((country) => country.code!))];
 
 export function countryPresentation(value?: string): CountryPresentation | undefined {
   const normalized = value?.trim();
@@ -138,6 +164,3 @@ export function scoreSource(kind: ScoreKind, providerIds?: Record<string, string
     href: id && /^(m|tv)\/[a-z0-9_-]+$/i.test(id) ? `https://www.rottentomatoes.com/${id}` : undefined,
   };
 }
-
-
-

@@ -8,11 +8,76 @@ export const progressEvents = [
 ] as const;
 
 export const airPlayNoticeDurationMs = 5_000;
-export const captionPrefsVersion = 4;
+export const captionPrefsVersion = 5;
 export const titleDisplayDurationMs = 7_000;
 export const pauseSynopsisDurationSeconds = 1.05;
 
 export type PlayerKeyboardAction = "toggle" | "seek-back" | "seek-forward" | "volume-up" | "volume-down" | "mute" | "captions" | "fullscreen";
+
+export const shortcutFlashDurationMs = 650;
+export const seekStepSeconds = 10;
+
+export type ShortcutFlashIcon =
+  | "play" | "pause" | "forward" | "backward"
+  | "volume" | "volume-low" | "volume-muted"
+  | "captions" | "captions-off";
+
+export type ShortcutFlash = { icon: ShortcutFlashIcon; label?: string };
+
+/** State AFTER the shortcut ran — the flash reports the result, not the key. */
+export type ShortcutFlashState = {
+  paused?: boolean;
+  volume?: number;
+  muted?: boolean;
+  captionsActive?: boolean;
+};
+
+// Volume goes to 2.0 here (the player boosts past unity via a gain node), so
+// the badge must not clamp at 100% or a boosted level reads as plain full.
+const volumePercent = (volume: number): string =>
+  `${Math.round(Math.max(0, volume) * 100)}%`;
+
+const volumeIcon = (volume: number): ShortcutFlashIcon => {
+  if (volume <= 0) return "volume-muted";
+  return volume < 0.5 ? "volume-low" : "volume";
+};
+
+/**
+ * The badge to flash for a keyboard shortcut, or null when the action's effect
+ * is already self-evident on screen (fullscreen resizes the viewport; a digit
+ * seek visibly jumps the scrubber) — a badge there is noise, not feedback.
+ */
+export function shortcutFlash(action: PlayerKeyboardAction, state: ShortcutFlashState): ShortcutFlash | null {
+  switch (action) {
+    case "toggle":
+      // Show the state the key produced: still playing => the play glyph.
+      return { icon: state.paused ? "pause" : "play" };
+    case "seek-forward":
+      return { icon: "forward", label: `${seekStepSeconds}s` };
+    case "seek-back":
+      return { icon: "backward", label: `${seekStepSeconds}s` };
+    case "volume-up":
+    case "volume-down": {
+      const volume = state.volume ?? 0;
+      return { icon: volumeIcon(volume), label: volumePercent(volume) };
+    }
+    case "mute":
+      return state.muted
+        ? { icon: "volume-muted", label: "Muted" }
+        : { icon: volumeIcon(state.volume ?? 0), label: volumePercent(state.volume ?? 0) };
+    case "captions":
+      return state.captionsActive
+        ? { icon: "captions", label: "On" }
+        : { icon: "captions-off", label: "Off" };
+    case "fullscreen":
+      return null;
+  }
+}
+
+/** Caption resize (+/-) reports the resulting size; it has no on-screen echo. */
+export function captionSizeFlash(fontSize: number): ShortcutFlash {
+  return { icon: "captions", label: `${Math.round(captionFontSize(fontSize))}%` };
+}
 
 export function playerKeyboardAction(key: string, code = ""): PlayerKeyboardAction | null {
   const normalizedKey = key.toLowerCase();
@@ -26,6 +91,12 @@ export function playerKeyboardAction(key: string, code = ""): PlayerKeyboardActi
   if (normalizedKey === "c" || normalizedCode === "keyc") return "captions";
   if (normalizedKey === "f" || normalizedCode === "keyf") return "fullscreen";
   return null;
+}
+
+export function seekTime(currentTime: number, delta: number, duration: number): number {
+  const current = Number.isFinite(currentTime) ? currentTime : 0;
+  const end = Number.isFinite(duration) && duration >= 0 ? duration : Infinity;
+  return Math.min(end, Math.max(0, current + delta));
 }
 
 export function isPlaybackToggleKey(key: string, code = ""): boolean {
@@ -61,7 +132,7 @@ export function migrateCaptionDefaults<T extends {
   if (saved.version === captionPrefsVersion) return saved;
   const migrated = { ...saved };
   if (saved.fontSize === 75) migrated.fontSize = 85;
-  if (saved.lineHeight === 1.25 || saved.lineHeight === 1.45 || saved.lineHeight === 1.53) migrated.lineHeight = 1.52;
+  if (saved.lineHeight === 1.25 || saved.lineHeight === 1.45 || saved.lineHeight === 1.53 || saved.lineHeight === 1.52) migrated.lineHeight = 1.49;
   if (saved.backgroundOpacity === .72) migrated.backgroundOpacity = .5;
   if (saved.portraitOffset === 8) migrated.portraitOffset = 12;
   return migrated;
@@ -78,8 +149,27 @@ export function captionVerticalOffset(value?: number): number {
 }
 
 export function captionLineHeight(value?: number): number {
-  if (!Number.isFinite(value)) return 1.52;
+  if (!Number.isFinite(value)) return 1.49;
   return Math.min(2, Math.max(1.45, value as number));
+}
+
+// Named font-size presets for the caption panel. Values are percentages that
+// feed the same fontSize field the slider drives, so a preset chip and the
+// slider stay in sync.
+const captionSizePresets = { small: 65, default: 85, large: 120 } as const;
+export type CaptionSizePreset = keyof typeof captionSizePresets;
+
+export function captionSizePreset(name: string): number {
+  return captionSizePresets[name as CaptionSizePreset] ?? captionSizePresets.default;
+}
+
+// Reverse lookup so the UI can highlight the active chip. Returns null for a
+// custom (slider-tuned) size that matches no preset, leaving every chip unlit.
+export function activeCaptionPreset(fontSize: number): CaptionSizePreset | null {
+  const match = (Object.keys(captionSizePresets) as CaptionSizePreset[]).find(
+    (name) => captionSizePresets[name] === fontSize,
+  );
+  return match ?? null;
 }
 
 export function prefersViewportFullscreen(maxTouchPoints = 0, coarsePointer = false, userAgent = ""): boolean {
@@ -167,6 +257,20 @@ function bitrate(value: number): string {
   return value >= 1_000_000 ? `${(value / 1_000_000).toFixed(2)} Mbps` : `${Math.round(value / 1_000)} kbps`;
 }
 
+export type StatSeverity = "good" | "warn" | "bad" | "neutral";
+
+// Colour signal for the "stats for nerds" readout. Only the values that carry a
+// health meaning get a colour; everything descriptive stays neutral so the
+// panel does not turn into a christmas tree.
+export function classifyStat(label: string, value: string): StatSeverity {
+  if (label === "Playback") return /direct/i.test(value) ? "good" : "warn";
+  if (label === "Frames") {
+    const dropped = Number.parseInt(value.replace(/,/g, ""), 10);
+    if (Number.isFinite(dropped)) return dropped > 0 ? "warn" : "good";
+  }
+  return "neutral";
+}
+
 export function formatPlaybackStats(input: PlaybackStatsInput): Array<[string, string]> {
   const stats: Array<[string, string]> = [];
   if (input.width && input.height) stats.push(["Resolution", `${input.width} × ${input.height}`]);
@@ -203,9 +307,14 @@ export function formatPlaybackStats(input: PlaybackStatsInput): Array<[string, s
 export const webPlaybackProfile = {
   Name: "Video Web",
   MaxStreamingBitrate: 120_000_000,
-  DirectPlayProfiles: [
-    { Container: "mp4,m4v", Type: "Video", VideoCodec: "h264", AudioCodec: "aac,mp3,ac3" },
-  ],
+  // NO DirectPlayProfiles — deliberate (2026-07-26). Direct play streamed the
+  // whole file as ONE unbounded range request through the gateway's small
+  // sync worker pool; a paused/slept client pinned that worker at the output
+  // watermark forever, and a few of those exhausted the pool (the "video
+  // not loading" outage). HLS keeps every request segment-sized; for h264/
+  // hevc Jellyfin remuxes (codec copy), so the cost is packaging, not a
+  // transcode.
+  DirectPlayProfiles: [] as { Container: string; Type: string; VideoCodec: string; AudioCodec: string }[],
   TranscodingProfiles: [
     {
       Container: "ts",
@@ -231,9 +340,9 @@ export function webPlaybackProfileFor(supportsHevc: boolean) {
   if (!supportsHevc) return webPlaybackProfile;
   return {
     ...webPlaybackProfile,
+    // "hls" direct play stays: it IS segment streaming (bounded requests),
+    // just without a repackage when the source is already HLS-compatible.
     DirectPlayProfiles: [
-      ...webPlaybackProfile.DirectPlayProfiles,
-      { Container: "mp4,m4v", Type: "Video", VideoCodec: "hevc,h265", AudioCodec: "aac,mp3,ac3,eac3" },
       { Container: "hls", Type: "Video", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3" },
     ],
     TranscodingProfiles: [

@@ -21,6 +21,9 @@ if not env_file.exists():
             "JELLYFIN_URL=http://127.0.0.1:8096",
             "MEDIA_AUTO_LOGIN_USERNAME=",
             "MEDIA_AUTO_LOGIN_PASSWORD=",
+            "PHOTOS_AUTO_LOGIN_USERNAME=",
+            "PHOTOS_AUTO_LOGIN_PASSWORD=",
+            "PHOTOS_ROOT=photos",
             "PORT=8079",
             "",
         ])

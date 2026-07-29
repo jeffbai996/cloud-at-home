@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import { editorModeFor, exactTimestamp, extensionFor, isTextFile, joinPath, languageForFile, relativeTimestamp, togglePath, viewerKindFor } from "./file-utils";
+import { editorModeFor, exactTimestamp, extensionFor, isTextFile, isUnderPhotosRoot, joinPath, languageForFile, mutationDestination, parentPath, photosDeepLink, relativeTimestamp, resourcePath, togglePath, viewerKindFor } from "./file-utils";
 
 describe("file utilities", () => {
   it("joins paths without producing traversal or duplicate slashes", () => {
     expect(joinPath("/TV Shows/", "/Example.mkv")).toBe("/TV Shows/Example.mkv");
     expect(() => joinPath("/TV Shows", "../secret")).toThrow();
+  });
+
+  it("uses an item's absolute path rather than the current collection path", () => {
+    const saved = { name: "budget.xlsx", path: "/Documents/Finance/budget.xlsx" };
+    expect(resourcePath(saved, "/Downloads")).toBe("/Documents/Finance/budget.xlsx");
+    expect(parentPath(saved.path)).toBe("/Documents/Finance");
+    expect(mutationDestination("rename", saved.path, "budget-2026.xlsx")).toBe("/Documents/Finance/budget-2026.xlsx");
+    expect(mutationDestination("move", saved.path, "/Archive")).toBe("/Archive/budget.xlsx");
+    expect(mutationDestination("copy", saved.path, "/Archive")).toBe("/Archive/budget.xlsx");
+  });
+
+  it("keeps literal percent characters display-safe in paths", () => {
+    expect(resourcePath({ name: "100% complete.txt" }, "/Downloads")).toBe("/Downloads/100% complete.txt");
+    expect(parentPath("/100% complete.txt")).toBe("/");
   });
 
   it("enforces editor size boundaries", () => {
@@ -51,5 +65,21 @@ describe("file utilities", () => {
     expect(relativeTimestamp("", Date.now(), "en-US")).toBe("Unavailable");
     expect(relativeTimestamp("not-a-date", Date.now(), "en-US")).toBe("Unavailable");
     expect(exactTimestamp("not-a-date", "en-US")).toBe("Unavailable");
+  });
+});
+
+describe("photos bridge", () => {
+  it("knows which paths live inside the photo library", () => {
+    expect(isUnderPhotosRoot("/photos/trip/a.jpg")).toBe(true);
+    expect(isUnderPhotosRoot("photos/a.jpg")).toBe(true);
+    expect(isUnderPhotosRoot("/photostudio/a.jpg")).toBe(false);
+    expect(isUnderPhotosRoot("/documents/a.jpg")).toBe(false);
+  });
+
+  it("builds a photos deep link to the album with the item focused", () => {
+    expect(photosDeepLink("https://host:8458", "/photos/trip/a.jpg")).toBe(
+      "https://host:8458/#/album/photos%2Ftrip?item=a.jpg");
+    expect(photosDeepLink("https://host:8458", "/photos/solo.jpg")).toBe(
+      "https://host:8458/#/album/photos?item=solo.jpg");
   });
 });

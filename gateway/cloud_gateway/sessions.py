@@ -115,3 +115,20 @@ class SessionStore:
                 "DELETE FROM sessions WHERE id_hash = ? AND service = ?",
                 (_hash(session_id), service),
             )
+
+    def update_token(self, session_id: str, service: str, token: str) -> Session | None:
+        """Replace upstream credentials without rotating the browser session."""
+        if not session_id:
+            return None
+        with self.database.connect() as connection:
+            updated = connection.execute(
+                """
+                UPDATE sessions
+                SET token_ciphertext = ?
+                WHERE id_hash = ? AND service = ?
+                """,
+                (self.vault.encrypt(token), _hash(session_id), service),
+            )
+            if updated.rowcount != 1:
+                return None
+        return self.get(session_id, service)

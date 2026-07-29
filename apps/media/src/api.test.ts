@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { episodesForSeries, homeItemFields, httpErrorMessage, imageUrl, subtitleTrackUrl, watchHistoryItemIds, type MediaItem } from "./api";
+import { episodesForSeries, getPlaybackInfo, homeItemFields, httpErrorMessage, imageUrl, subtitleTrackUrl, watchHistoryItemIds, type MediaItem } from "./api";
 
 const episode = (id: string, seriesId?: string): MediaItem => ({
   Id: id,
@@ -8,6 +8,8 @@ const episode = (id: string, seriesId?: string): MediaItem => ({
   Type: "Episode",
   SeriesId: seriesId,
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("watchHistoryItemIds", () => {
   it("combines completed and resumable items without clearing an item twice", () => {
@@ -40,6 +42,25 @@ describe("media artwork", () => {
 describe("home library payload", () => {
   it("defers heavyweight playback sources until a title is played", () => {
     expect(homeItemFields.split(",")).not.toContain("MediaSources");
+  });
+});
+
+describe("playback API", () => {
+  it("uses the gateway-owned endpoint without sending a browser-chosen user id", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      PlaySessionId: "play-1",
+      MediaSources: [],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+
+    await getPlaybackInfo("movie-123", true);
+
+    expect(fetch).toHaveBeenCalledOnce();
+    const [url, options] = fetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/media/items/movie-123/playback");
+    expect(JSON.parse(String(options.body))).toEqual({
+      DeviceProfile: expect.any(Object),
+    });
   });
 });
 

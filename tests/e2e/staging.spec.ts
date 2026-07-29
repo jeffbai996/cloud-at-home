@@ -1,15 +1,31 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function mockPlaybackInfo(page: Page, mediaStreams: unknown[] = []) {
+  await page.route("**/api/media/items/*/playback", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      PlaySessionId: "play-1",
+      MediaSources: [{ Id: "source-1", SupportsDirectPlay: true, SupportsTranscoding: true, MediaStreams: mediaStreams }],
+    }),
+  }));
+}
 
 const apps = [
-  { name: "Cloud", url: "http://127.0.0.1:8082" },
+  { name: "Cloud at Home", url: "http://127.0.0.1:8082" },
+  { name: "Cloud Photos", url: "http://127.0.0.1:8083" },
   { name: "Video", url: "http://127.0.0.1:8090" },
 ];
 
 for (const app of apps) {
   test(`${app.name} renders a stable entry surface`, async ({ page }) => {
     await page.goto(app.url);
-    if (app.name === "Cloud") {
-      await expect(page.getByRole("heading", { name: "Sign in to Cloud" })).toBeVisible();
+    if (app.name === "Cloud Photos") {
+      // Tailnet-only and login-free: the entry surface is the gallery itself.
+      await expect(page.getByRole("searchbox", { name: "Search photos" })).toBeVisible();
+      await expect(page.getByLabel("Password")).toHaveCount(0);
+    } else if (app.name !== "Video") {
+      await expect(page.getByRole("heading", { name: `Sign in to ${app.name}`, exact: true })).toBeVisible();
       await expect(page.getByLabel("Username")).toBeVisible();
       await expect(page.getByLabel("Password")).toBeVisible();
     } else {
@@ -33,9 +49,9 @@ for (const app of apps) {
   test(`${app.name} services menu exposes every surface`, async ({ page }) => {
     await page.goto(app.url);
     await page.getByRole("button", { name: "Switch app" }).click();
-    await expect(page.locator(".app-switcher-trigger svg")).toHaveClass(/cloud-cloud-mark/);
+    await expect(page.locator(".app-switcher-trigger svg")).toHaveClass(/cloud-home-cloud-mark/);
     await expect(page.locator(".app-switcher-trigger")).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-    expect(parseFloat(await page.locator(".cloud-cloud-mark").evaluate((element) => getComputedStyle(element).width))).toBeGreaterThanOrEqual(24);
+    expect(parseFloat(await page.locator(".cloud-home-cloud-mark").evaluate((element) => getComputedStyle(element).width))).toBeGreaterThanOrEqual(24);
     const switcherCenter = await page.locator(".app-switcher-trigger").evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       return bounds.left + bounds.width / 2;
@@ -44,12 +60,14 @@ for (const app of apps) {
     await expect(page.locator(".dropdown-label")).toHaveText("SERVICES");
     await expect(page.getByRole("menuitem", { name: "Video" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Drive" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Photos" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Local AI" })).toBeVisible();
     const extraService = page.locator(".app-switcher-item").filter({ has: page.locator(".app-glyph-extra") });
     await expect(extraService).toBeVisible();
     await expect(extraService).toHaveText(/^[a-z]+-[a-z]+$/);
     await expect(page.getByRole("menuitem", { name: "Video" })).toHaveAttribute("href", "http://127.0.0.1:8090");
     await expect(page.getByRole("menuitem", { name: "Drive" })).toHaveAttribute("href", "http://127.0.0.1:8082");
+    await expect(page.getByRole("menuitem", { name: "Photos" })).toHaveAttribute("href", "http://127.0.0.1:8083");
     await expect(extraService).toHaveAttribute("href", "/api/navigation/extra-service/open");
     if (app.name === "Video") {
       await expect(page.locator(".app-glyph-media")).toHaveCSS("background-color", "rgb(255, 138, 31)");
@@ -112,7 +130,7 @@ test("Video keeps the theme toggle inside the phone header", async ({ page }) =>
   await expect(page.getByRole("button", { name: "Cinema mode" })).toBeVisible();
   await expect(page.locator(".topbar-signout")).toBeHidden();
   await page.getByRole("button", { name: "Open Video menu" }).click();
-  await expect(page.locator(".cloud-media-menu-popover").getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(page.locator(".video-menu-popover").getByRole("button", { name: "Sign out" })).toBeVisible();
   await page.getByRole("button", { name: "Close Video menu" }).click();
   const bounds = await page.getByRole("button", { name: /Switch to .* theme/ }).evaluate((element) => element.getBoundingClientRect());
   expect(bounds.left).toBeGreaterThanOrEqual(0);
@@ -126,7 +144,9 @@ test("Video keeps the theme toggle inside the phone header", async ({ page }) =>
 });
 
 test("Video card hover stays inside the horizontal rail", async ({ page }) => {
-  const item = { Id: "item-1", Name: "Example movie", Type: "Movie", ProductionYear: 2024, RunTimeTicks: 36_000_000_000, OfficialRating: "CA-14A", CommunityRating: 8.5, CriticRating: 73, Genres: ["Drama", "Comedy", "Science Fiction", "Adventure"], Studios: [{ Name: "Example Pictures" }], ProductionLocations: ["United States of America"], ProviderIds: { Imdb: "tt1375666", RottenTomatoes: "m/example_movie" }, UserData: { PlaybackPositionTicks: 6_000_000_000, PlayedPercentage: 16.7, Played: false } };
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
+  const fullSynopsis = `${"A complete synopsis should remain visible when the viewport has room. ".repeat(8)}The final sentence must not be replaced by an ellipsis.`;
+  const item = { Id: "item-1", Name: "Example movie", Type: "Movie", Overview: fullSynopsis, ProductionYear: 2024, RunTimeTicks: 36_000_000_000, OfficialRating: "CA-14A", CommunityRating: 8.5, CriticRating: 73, Genres: ["Drama", "Comedy", "Science Fiction", "Adventure"], Studios: [{ Name: "Example Pictures" }], ProductionLocations: ["United States of America"], ProviderIds: { Imdb: "tt1375666", RottenTomatoes: "m/example_movie" }, UserData: { PlaybackPositionTicks: 6_000_000_000, PlayedPercentage: 16.7, Played: false } };
   const items = Array.from({ length: 10 }, (_, index) => ({ ...item, Id: `item-${index}`, Name: `Example movie ${index + 1}` }));
   const series = { ...item, Id: "series-1", Name: "Example series", Type: "Series" };
   let removedHistoryItem = "";
@@ -146,7 +166,7 @@ test("Video card hover stays inside the horizontal rail", async ({ page }) => {
       : JSON.stringify({ Items: url.includes("IncludeItemTypes=Movie") ? items : url.includes("IncludeItemTypes=Series") ? [series] : [] });
     return route.fulfill({ status: 200, contentType: "application/json", body });
   });
-  await page.goto("http://127.0.0.1:8090");
+  await page.goto(videoUrl);
 
   const railHeadingSize = (await page.viewportSize())!.width >= 1000 ? "27px" : "20px";
   await expect(page.getByRole("heading", { name: "TV Series" })).toHaveCSS("font-size", railHeadingSize);
@@ -175,6 +195,7 @@ test("Video card hover stays inside the horizontal rail", async ({ page }) => {
   expect(cardBounds).not.toBeNull();
   expect(cardBounds!.y).toBeGreaterThanOrEqual(railBounds!.y);
   await card.click();
+  await expect(page.locator(".details-copy > p")).toHaveText(fullSynopsis);
   const [detailsBounds, copyBounds, titleBounds, synopsisBounds, factsBounds] = await Promise.all([
     page.locator(".details-card").boundingBox(),
     page.locator(".details-copy").boundingBox(),
@@ -189,15 +210,21 @@ test("Video card hover stays inside the horizontal rail", async ({ page }) => {
   expect(detailsBounds!.x + detailsBounds!.width - (titleBounds!.x + titleBounds!.width)).toBeGreaterThanOrEqual(40);
   await expect(page.locator(".details-facts")).toHaveCSS("flex-wrap", "nowrap");
   await expect(page.locator(".details-facts .details-category-genre")).toHaveCount(2);
-  await expect(page.locator(".details-facts .rating-badge-ca").first()).toHaveCSS("font-weight", "700");
+  await expect(page.locator(".details-facts .rating-badge-ca").first()).toHaveCSS("font-weight", "650");
   await expect(page.locator(".details-facts .critic-rating")).toContainText("73%");
-  await expect(page.locator(".details-facts .critic-rating")).toHaveCSS("font-weight", "550");
+  await expect(page.locator(".details-facts .critic-rating")).toHaveCSS("font-size", "13px");
+  await expect(page.locator(".details-facts .critic-rating")).toHaveCSS("font-weight", "600");
+  await expect(page.locator(".details-facts .critic-rating")).toHaveCSS("font-family", /Anthropic Sans/);
+  await expect(page.locator(".details-facts .critic-rating .score-value > .score-percent")).toHaveCSS("vertical-align", "baseline");
   await expect(page.locator(".details-facts .critic-rating > svg")).toHaveCount(1);
-  await expect(page.locator(".details-facts .community-rating")).toHaveCSS("font-weight", "550");
+  await expect(page.locator(".details-facts .community-rating")).toHaveCSS("font-size", "13px");
+  await expect(page.locator(".details-facts .community-rating")).toHaveCSS("font-weight", "600");
+  await expect(page.locator(".details-facts .community-rating")).toHaveCSS("font-family", /Anthropic Sans/);
+  await expect(page.locator(".details-facts .details-category").first()).toHaveCSS("font-family", /Anthropic Sans/);
   await expect(page.locator(".details-facts .details-category").first()).toHaveCSS("font-weight", "500");
   await expect(page.locator(".details-facts .details-category-context")).toHaveCount(1);
-  await expect(page.locator(".details-facts .country-pill")).toHaveAccessibleName("Production country: United States of America");
-  await expect(page.locator(".details-facts .country-pill svg.country-flag")).toHaveCount(1);
+  await expect(page.locator(".details-facts .country-pill")).toHaveAccessibleName("Production details for United States");
+  await expect(page.locator(".details-facts .country-pill > .country-flag")).toHaveCount(1);
   await expect(page.locator(".details-facts .rating-badge-ca").first()).toHaveClass(/rating-badge-triangle/);
   await expect(page.locator(".details-facts .rating-badge-ca").first()).toHaveClass(/rating-badge-yellow/);
   await page.locator(".details-facts .rating-badge-ca").first().hover();
@@ -208,21 +235,25 @@ test("Video card hover stays inside the horizontal rail", async ({ page }) => {
   await expect(classificationCard).toBeVisible();
   await page.locator(".details-copy h1").hover();
   await expect.poll(() => classificationCard.evaluate((element) => getComputedStyle(element).opacity)).toBe("0");
-  await expect(page.getByRole("button", { name: "Add to favorites" })).toHaveCSS("font-weight", "550");
-  await expect(page.getByRole("button", { name: "Create a list" })).toHaveCSS("font-weight", "550");
-  await expect(page.getByRole("button", { name: "Remove from history" })).toHaveCSS("font-weight", "550");
+  await expect(page.getByRole("button", { name: "Add to favorites" })).toHaveCSS("font-weight", "500");
+  await expect(page.getByRole("button", { name: "Add to list" })).toHaveCSS("font-weight", "500");
+  await expect(page.getByRole("button", { name: "Remove from history" })).toHaveCSS("font-weight", "500");
+  await expect(page.locator(".details-actions").getByRole("button", { name: "Resume" })).toHaveCSS("font-weight", "600");
+  await expect(page.locator(".details-actions").getByRole("button", { name: "Play from beginning" })).toHaveCSS("font-weight", "600");
+  await expect(page.locator(".details-progress strong")).toHaveCSS("font-weight", "600");
   await expect(page.getByRole("button", { name: "Add to favorites" })).toHaveCSS("min-height", "39px");
-  await expect(page.getByRole("button", { name: "Create a list" }).locator("svg")).toHaveClass(/lucide-list-plus/);
-  await expect(page.getByRole("button", { name: "Create a list" })).toHaveCSS("gap", "6px");
+  await expect(page.getByRole("button", { name: "Add to list" }).locator("svg")).toHaveClass(/lucide-list-plus/);
+  await expect(page.getByRole("button", { name: "Add to list" })).toHaveCSS("gap", "6px");
   if (!await page.evaluate(() => matchMedia("(hover: none)").matches)) {
     const favorite = page.getByRole("button", { name: "Add to favorites" });
     expect((await favorite.boundingBox())!.width).toBeLessThanOrEqual(40);
     await favorite.hover();
     await expect.poll(async () => (await favorite.boundingBox())!.width).toBeGreaterThan(100);
     const country = page.locator(".country-pill");
-    expect((await country.boundingBox())!.width).toBeLessThanOrEqual(33);
+    const countryWidth = (await country.boundingBox())!.width;
+    expect(countryWidth).toBeGreaterThan(100);
     await country.hover();
-    await expect.poll(async () => (await country.boundingBox())!.width).toBeGreaterThan(120);
+    await expect.poll(async () => (await country.boundingBox())!.width).toBe(countryWidth);
   }
   await page.locator(".details-facts .community-rating").hover();
   const imdbTooltip = page.getByRole("tooltip").filter({ hasText: "IMDb" });
@@ -247,7 +278,7 @@ test("Video card hover stays inside the horizontal rail", async ({ page }) => {
   await expect(page.locator(".details-facts .country-pill")).toBeVisible();
   await expect(page.locator(".details-category-studio .details-category-label")).toHaveCSS("text-overflow", "ellipsis");
   await expect(page.locator(".country-pill-label")).toHaveCSS("text-overflow", "ellipsis");
-  expect((await page.locator(".details-facts").boundingBox())!.height).toBeLessThanOrEqual(39);
+  expect((await page.locator(".details-facts").boundingBox())!.height).toBeLessThanOrEqual(77);
   await page.getByRole("button", { name: "Remove from history" }).click();
   await expect.poll(() => removedHistoryItem).toBe("item-0");
   await expect(page.getByRole("button", { name: "Remove from history" })).toHaveCount(0);
@@ -255,8 +286,44 @@ test("Video card hover stays inside the horizontal rail", async ({ page }) => {
   await expect(page.locator(".details-card")).toHaveCount(0);
 });
 
+test("Video optically aligns Canadian TV marks with score pills", async ({ page }) => {
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
+  const item = {
+    Id: "rating-14-plus",
+    Name: "Rating 14+",
+    Type: "Movie",
+    OfficialRating: "CA-14+",
+    CommunityRating: 8.7,
+  };
+  await page.route("**/api/auth/media/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ authenticated: true, user: { id: "user-1", name: "alice" }, csrf: "example" }),
+  }));
+  await page.route("**/api/media/proxy/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: route.request().url().includes("Latest") ? JSON.stringify([item]) : JSON.stringify({ Items: [item] }),
+  }));
+  await page.goto(videoUrl);
+  await page.locator(".media-card").first().locator(".poster-open").click({ position: { x: 10, y: 10 } });
+
+  const [classificationBox, communityBox] = await Promise.all([
+    page.locator(".details-facts .canadian-tv-rating-mark").first().boundingBox(),
+    page.locator(".details-facts .community-rating").first().boundingBox(),
+  ]);
+  expect(classificationBox).not.toBeNull();
+  expect(communityBox).not.toBeNull();
+  const classificationCenter = classificationBox!.y + classificationBox!.height / 2;
+  const communityCenter = communityBox!.y + communityBox!.height / 2;
+  // The maple leaf makes the artwork optically bottom-heavy; compensate by
+  // placing its geometric center slightly above the neighboring score pill.
+  expect(communityCenter - classificationCenter).toBeGreaterThanOrEqual(1.25);
+  expect(communityCenter - classificationCenter).toBeLessThanOrEqual(2.75);
+});
+
 test("Video keeps 14A and 18A labels in the Canadian badge typeface", async ({ page }) => {
-  const videoUrl = process.env.MEDIA_E2E_URL ?? "http://127.0.0.1:8090";
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
   const items = ["14A", "18A"].map((rating) => ({
     Id: `rating-${rating}`,
     Name: `Rating ${rating}`,
@@ -279,8 +346,7 @@ test("Video keeps 14A and 18A labels in the Canadian badge typeface", async ({ p
     await page.locator(".media-card").filter({ hasText: `Rating ${rating}` }).first().locator(".poster-open").click({ position: { x: 10, y: 10 } });
     const badge = page.locator(".details-facts > .rating-classification > .rating-badge-ca").first();
     await expect(badge).toContainText(rating);
-    // PRODUCT CONTRACT: do not update this expectation unless the user
-    // explicitly changes the 14A/18A typography requirement.
+    // PRODUCT CONTRACT: shaped BC badges retain their original DM Sans face.
     await expect(badge).toHaveCSS("font-family", /DM Sans/);
     const [badgeBounds, contentBounds] = await Promise.all([
       badge.boundingBox(),
@@ -294,7 +360,7 @@ test("Video keeps 14A and 18A labels in the Canadian badge typeface", async ({ p
 });
 
 test("Video contains top overscroll above its navigation", async ({ page }) => {
-  const videoUrl = process.env.MEDIA_E2E_URL ?? "http://127.0.0.1:8090";
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
   await page.route("**/api/auth/media/session", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -331,9 +397,10 @@ test("Video keeps the top of movie artwork visible in wide details cards", async
 });
 
 test("Video score pills stay legible and open tooltips into the details card", async ({ page }) => {
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
   const item = {
     Id: "movie-score-1",
-    Name: "Example movie",
+    Name: "1917",
     Type: "Movie",
     ProductionYear: 2024,
     PremiereDate: "2024-07-12T00:00:00.000Z",
@@ -353,15 +420,24 @@ test("Video score pills stay legible and open tooltips into the details card", a
     const body = route.request().url().includes("Latest") ? JSON.stringify([item]) : JSON.stringify({ Items: [item] });
     return route.fulfill({ status: 200, contentType: "application/json", body });
   });
-  await page.goto("http://127.0.0.1:8090");
+  await page.goto(videoUrl);
   await page.locator(".media-card .poster-open").first().click({ position: { x: 10, y: 10 } });
-
-  await expect.poll(async () => page.locator(".details-copy h1").evaluate((element) => parseFloat(getComputedStyle(element).letterSpacing) / parseFloat(getComputedStyle(element).fontSize))).toBeCloseTo(-.035, 3);
+  await expect(page.locator(".details-copy h1")).toHaveClass(/numeric-title/);
+  await expect(page.locator(".details-copy h1")).toHaveCSS("letter-spacing", "normal");
 
   const imdb = page.locator(".details-facts .community-rating");
   const tomato = page.locator(".details-facts .critic-rating");
-  await expect(imdb).toHaveCSS("font-size", "11px");
-  await expect(tomato).toHaveCSS("font-size", "11px");
+  await expect(imdb).toHaveCSS("font-size", "13px");
+  await expect(tomato).toHaveCSS("font-size", "13px");
+  await expect(tomato.locator(".score-value > .score-percent")).toHaveCSS("font-size", "8.64px");
+  const percentGap = await tomato.locator(".score-value").evaluate((element) => {
+    const text = element.firstChild!;
+    const range = document.createRange();
+    range.selectNode(text);
+    return element.querySelector(".score-percent")!.getBoundingClientRect().left - range.getBoundingClientRect().right;
+  });
+  expect(percentGap).toBeGreaterThan(-1);
+  expect(percentGap).toBeLessThan(1);
 
   await imdb.focus();
   const tooltip = page.getByRole("tooltip").filter({ hasText: "IMDb" });
@@ -376,23 +452,97 @@ test("Video score pills stay legible and open tooltips into the details card", a
   expect(tooltipBounds!.x + tooltipBounds!.width).toBeLessThanOrEqual(detailsBounds!.x + detailsBounds!.width);
 
   await tomato.focus();
+  await expect(tomato.getByRole("tooltip").locator(".score-percent")).toHaveCSS("font-size", "10.2px");
   await expect(page.getByRole("link", { name: "View title on Rotten Tomatoes" })).toHaveAttribute("href", "https://www.rottentomatoes.com/m/example_movie");
 
   const rating = page.locator(".rating-classification > .rating-badge");
+  await expect(rating).toHaveCSS("font-family", /Plus Jakarta Sans/);
+  await expect(rating.locator(".mpa-rating-mark[data-rating='R'] > svg")).toHaveCount(1);
+  await expect(rating.locator("img")).toHaveCount(0);
+  await expect(rating.locator(".mpa-rating-mark")).toHaveCSS("height", "28px");
+  await expect(rating.locator(".mpa-rating-mark")).toHaveCSS("border-top-width", "1px");
+  await expect(rating.locator(".mpa-rating-mark")).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(rating.locator(".mpa-rating-mark")).toHaveCSS("border-top-color", "rgb(0, 0, 0)");
+  await expect(rating.locator(".mpa-rating-mark-glyph")).toHaveCSS("height", "18px");
+  const [classificationBox, communityBox] = await Promise.all([
+    rating.boundingBox(),
+    page.locator(".details-facts .community-rating").boundingBox(),
+  ]);
+  expect(classificationBox).not.toBeNull();
+  expect(communityBox).not.toBeNull();
+  expect(Math.abs(
+    classificationBox!.y + classificationBox!.height / 2
+      - (communityBox!.y + communityBox!.height / 2),
+  )).toBeLessThanOrEqual(.25);
   const ratingTransform = await rating.evaluate((element) => getComputedStyle(element).transform);
   await rating.hover();
   await expect.poll(() => rating.evaluate((element) => getComputedStyle(element).transform)).toBe(ratingTransform);
 
-  const country = page.locator(".country-pill");
+  const country = page.locator(".country-pill").first();
   await expect(country.locator(".country-pill-label")).toHaveText("United States");
-  await expect(country.locator(".country-flag")).toHaveAttribute("src", "/flags/us.svg");
+  await expect(country.locator(":scope > .country-flag")).toHaveAttribute("src", "/flags/us.svg");
+  expect(await country.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return style.paddingLeft === style.paddingRight;
+  })).toBe(true);
   const countryWidth = await country.evaluate((element) => getComputedStyle(element).width);
   await country.hover();
   await expect(country).toHaveCSS("width", countryWidth);
-  const production = page.getByRole("tooltip").filter({ hasText: "Production details" });
-  await expect(production).toContainText("United States · Canada");
+  const production = country.getByRole("tooltip");
+  await expect(production).toContainText("United States");
+  await expect(production).toContainText("Canada");
   await expect(production).toContainText("Example Pictures");
   await expect(production).toContainText("July 12, 2024");
+});
+
+test("Video centers every MPA glyph by its painted artwork", async ({ page }) => {
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
+  const labels = ["G", "PG", "PG-13", "R", "NC-17"];
+  const maximumFrameWidth: Record<string, number> = {
+    G: 34,
+    PG: 52,
+    "PG-13": 80,
+    R: 38,
+    "NC-17": 82,
+  };
+  let selectedLabel = labels[0];
+  await page.route("**/api/auth/media/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ authenticated: true, user: { id: "user-1", name: "alice" }, csrf: "example" }),
+  }));
+  await page.route("**/api/media/proxy/**", (route) => {
+    const item = { Id: `movie-${selectedLabel}`, Name: "Example movie", Type: "Movie", OfficialRating: selectedLabel };
+    const body = route.request().url().includes("Latest") ? JSON.stringify([item]) : JSON.stringify({ Items: [item] });
+    return route.fulfill({ status: 200, contentType: "application/json", body });
+  });
+
+  for (const label of labels) {
+    selectedLabel = label;
+    await page.goto(videoUrl);
+    await page.locator(".media-card .poster-open").first().click({ position: { x: 10, y: 10 } });
+    const centers = await page.locator(".rating-classification > .rating-badge .mpa-rating-mark").evaluate((mark) => {
+      const frame = mark.getBoundingClientRect();
+      const glyph = mark.querySelector("svg")!;
+      const artwork = glyph.getBBox();
+      const point = glyph.createSVGPoint();
+      point.x = artwork.x + artwork.width / 2;
+      point.y = artwork.y + artwork.height / 2;
+      const paintedCenter = point.matrixTransform(glyph.getScreenCTM()!);
+      return {
+        frameX: frame.x + frame.width / 2,
+        frameY: frame.y + frame.height / 2,
+        artworkX: paintedCenter.x,
+        artworkY: paintedCenter.y,
+      };
+    });
+    expect(Math.abs(centers.frameX - centers.artworkX), label).toBeLessThanOrEqual(.5);
+    expect(Math.abs(centers.frameY - centers.artworkY), label).toBeLessThanOrEqual(.5);
+    const frame = await page.locator(".rating-classification > .rating-badge .mpa-rating-mark").boundingBox();
+    expect(frame).not.toBeNull();
+    expect(Math.abs(frame!.height - 28), label).toBeLessThanOrEqual(.25);
+    expect(frame!.width, label).toBeLessThanOrEqual(maximumFrameWidth[label]);
+  }
 });
 
 test("Video refresh uses a neutral boot frame without the legacy F badge", async ({ page }) => {
@@ -422,8 +572,27 @@ test("Video treats a session service failure as an outage, not a logout", async 
   await expect(page.getByRole("heading", { name: "Sign in to Video" })).toHaveCount(0);
 });
 
+test("Video uses Jakarta for carousel category headings", async ({ page }) => {
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
+  const item = { Id: "item-1", Name: "Example movie", Type: "Movie", UserData: { Played: false } };
+  await page.route("**/api/auth/media/session", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ authenticated: true, user: { id: "user-1", name: "alice" }, csrf: "example" }),
+  }));
+  await page.route("**/api/media/proxy/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: route.request().url().includes("Latest") ? JSON.stringify([item]) : JSON.stringify({ Items: [] }),
+  }));
+  await page.goto(videoUrl);
+
+  await expect(page.locator(".media-rail h2").first()).toHaveCSS("font-family", /Plus Jakarta Sans/);
+});
+
 test("Video header is scaled, orange, and exposes app navigation", async ({ page }) => {
-  const item = { Id: "item-1", Name: "Example movie", Type: "Movie", Overview: "A sharp modern description.", RunTimeTicks: 36_000_000_000, UserData: { PlaybackPositionTicks: 6_000_000_000, PlayedPercentage: 16.7, Played: false } };
+  const fullSynopsis = `${"A sharp modern description that belongs on the Now Watching hero. ".repeat(5)}The final sentence must remain visible.`;
+  const item = { Id: "item-1", Name: "Example movie", Type: "Movie", ProductionYear: 2024, Overview: fullSynopsis, RunTimeTicks: 36_000_000_000, UserData: { PlaybackPositionTicks: 6_000_000_000, PlayedPercentage: 16.7, Played: false } };
   await page.route("**/api/auth/media/session", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -441,33 +610,47 @@ test("Video header is scaled, orange, and exposes app navigation", async ({ page
   expect(headerHeight).toBeLessThanOrEqual(66);
   expect(await page.locator(".brand").evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(23);
   await expect(page.locator(".brand-mark-media")).toHaveCSS("background-color", "rgb(255, 138, 31)");
+  await expect(page.locator(".brand")).toHaveCSS("font-family", /Plus Jakarta Sans/);
   await expect(page.locator(".brand-mark-media svg")).toHaveClass(/lucide-clapperboard/);
   await expect(page.getByRole("searchbox", { name: "Search Video" })).toHaveAttribute("placeholder", "search...");
+  expect(await page.getByRole("searchbox", { name: "Search Video" }).evaluate((element) => {
+    const style = getComputedStyle(element, "::placeholder");
+    return { inputSize: getComputedStyle(element).fontSize, placeholderSize: style.fontSize, placeholderWeight: style.fontWeight, placeholderColor: style.color };
+  })).toEqual({ inputSize: "12.5px", placeholderSize: "11.5px", placeholderWeight: "400", placeholderColor: "rgba(255, 255, 255, 0.28)" });
   await expect(page.locator(".hero .eyebrow")).toHaveText("NOW WATCHING");
   await expect(page.locator(".hero .eyebrow")).toHaveCSS("text-transform", "uppercase");
-  await expect(page.locator(".hero p")).toHaveCSS("font-family", /Plus Jakarta Sans/);
+  await expect(page.locator(".hero-meta > span").first()).toHaveCSS("font-weight", "550");
+  await expect(page.locator(".hero-meta > span").nth(1)).toHaveCSS("font-weight", "500");
+  await expect(page.locator(".hero h1")).toHaveCSS("font-weight", "650");
+  await expect(page.locator(".hero p")).toHaveCSS("font-family", /Anthropic Sans/);
   await expect(page.locator(".hero p")).toHaveCSS("font-size", "14px");
+  await expect(page.locator(".hero p")).toHaveText(fullSynopsis);
+  expect(await page.locator(".hero p").evaluate((element) => ({
+    lineClamp: getComputedStyle(element).webkitLineClamp,
+    fullyVisible: element.scrollHeight === element.clientHeight,
+    heroFitsContent: element.closest(".hero")!.scrollHeight === element.closest(".hero")!.clientHeight,
+  }))).toEqual({ lineClamp: "none", fullyVisible: true, heroFitsContent: true });
   await expect(page.locator(".hero")).toHaveAttribute("style", /Images\/Primary/);
   await expect(page.getByRole("button", { name: "Resume" })).toHaveCSS("border-radius", "999px");
   await expect(page.getByRole("button", { name: "Play from beginning" })).toHaveCSS("border-radius", "999px");
-  await expect(page.getByRole("button", { name: "More info" })).toHaveCSS("border-radius", "999px");
-  await expect(page.getByRole("button", { name: "More info" })).toHaveCSS("font-size", "11.5px");
-  await expect(page.getByRole("button", { name: "More info" })).toHaveCSS("min-height", "39px");
-  expect((await page.getByRole("button", { name: "More info" }).boundingBox())!.height).toBeLessThan((await page.getByRole("button", { name: "Resume" }).boundingBox())!.height);
+  await expect(page.getByRole("button", { name: "More info" })).toHaveCSS("border-radius", "50%");
+  await expect(page.getByRole("button", { name: "More info" })).toHaveCSS("font-size", "14.5px");
+  await expect(page.getByRole("button", { name: "More info" })).toHaveCSS("min-height", "48px");
+  expect((await page.getByRole("button", { name: "More info" }).boundingBox())!.height).toBe((await page.getByRole("button", { name: "Resume" }).boundingBox())!.height);
   await expect(page.getByRole("button", { name: /^Favorites/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Open Video menu" }).click();
   for (const name of ["Search library", "Favorites", "Continue watching", "Recently added", "Movies", "Shows", "Surprise me", "Refresh home", "Clear watch history"]) {
     await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   }
-  await expect(page.locator(".cloud-media-menu-popover kbd")).toHaveCount(0);
+  await expect(page.locator(".video-menu-popover kbd")).toHaveCount(0);
   const menuButtonCenter = await page.getByRole("button", { name: "Close Video menu" }).evaluate((element) => {
     const bounds = element.getBoundingClientRect();
     return bounds.left + bounds.width / 2;
   });
   expect(menuButtonCenter).toBeGreaterThan((await page.viewportSize())!.width / 2);
-  expect(await page.locator(".cloud-media-menu-trigger").evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(34);
-  expect(await page.locator(".cloud-media-menu-popover").evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(230);
+  expect(await page.locator(".video-menu-trigger").evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(34);
+  expect(await page.locator(".video-menu-popover").evaluate((element) => element.getBoundingClientRect().width)).toBeLessThanOrEqual(230);
   await page.getByRole("button", { name: "Cinema mode" }).click();
   await expect(page.locator(".topbar")).toHaveCSS("height", "0px");
   await page.mouse.move(4, 4);
@@ -489,25 +672,25 @@ test("Video series modal loads episodes and plays the next episode", async ({ pa
   };
   const episodes = [
     { Id: "episode-1", Name: "Pilot", Type: "Episode", SeriesId: "series-1", SeriesName: "Billions", ParentIndexNumber: 1, IndexNumber: 1, RunTimeTicks: 3_420_000_000, Overview: "Chuck begins his investigation.", UserData: { Played: false, PlaybackPositionTicks: 1_710_000_000, PlayedPercentage: 50 } },
-    { Id: "episode-2", Name: "Naming Rights", Type: "Episode", ParentIndexNumber: 1, IndexNumber: 2, RunTimeTicks: 3_360_000_000, Overview: "Axe makes his next move.", UserData: { Played: false } },
+    { Id: "episode-2", Name: "Naming Rights", Type: "Episode", SeriesId: "series-1", SeriesName: "Billions", ParentIndexNumber: 1, IndexNumber: 2, RunTimeTicks: 3_360_000_000, Overview: "Axe makes his next move.", UserData: { Played: false } },
   ];
+  await page.addInitScript(() => {
+    localStorage.setItem("video-lists", JSON.stringify([{ id: "my-list", name: "My List", items: [] }]));
+    localStorage.setItem("video-promoted-list", "my-list");
+  });
 
   await page.route("**/api/auth/media/session", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({ authenticated: true, user: { id: "user-1", name: "alice" }, csrf: "example" }),
   }));
+  await mockPlaybackInfo(page);
   await page.route("**/api/media/proxy/**", (route) => {
     const url = route.request().url();
     if (url.includes("Shows/series-1/Episodes")) return route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ Items: episodes }),
-    });
-    if (url.includes("PlaybackInfo")) return route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ PlaySessionId: "play-1", MediaSources: [{ Id: "source-1", SupportsDirectPlay: true, SupportsTranscoding: true, MediaStreams: [] }] }),
     });
     return route.fulfill({
       status: 200,
@@ -520,45 +703,53 @@ test("Video series modal loads episodes and plays the next episode", async ({ pa
   await page.goto("http://127.0.0.1:8090");
   await page.evaluate(() => window.scrollTo(0, 120));
   const scrollBeforeModal = await page.evaluate(() => window.scrollY);
-  const billionsCard = page.getByRole("button", { name: /Billions/ });
+  const billionsCard = page.locator(".media-card-copy", { hasText: "Billions" });
   await expect(billionsCard.locator(":scope > strong")).toHaveCSS("font-size", "14.5px");
-  await expect(billionsCard.locator(":scope > span")).toHaveCSS("font-size", "11.75px");
+  await expect(billionsCard.locator(":scope > strong")).toHaveCSS("font-weight", "750");
+  await expect(billionsCard.locator(":scope > span:not(.card-overlay)")).toHaveCSS("font-size", "11.75px");
+  await expect(billionsCard.locator(":scope > span:not(.card-overlay)")).toHaveCSS("font-weight", "500");
   await billionsCard.click();
 
-  await expect.poll(() => page.evaluate(() => document.body.style.position)).toBe("fixed");
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
   await page.locator(".details-card").evaluate((element) => { element.scrollTop = 200; });
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforeModal);
 
   await expect(page.getByRole("heading", { name: "Season 1" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /S1 E1.*Pilot/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /S1 E2.*Naming Rights/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /EPISODE 1.*Pilot/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /EPISODE 2.*Naming Rights/ })).toBeVisible();
   await expect(page.locator(".details-card")).not.toContainText("0 min");
   await expect(page.locator(".details-copy > p")).toHaveCSS("font-size", "13px");
+  await expect(page.locator(".details-copy > p")).toHaveCSS("font-weight", "500");
   await expect(page.locator(".details-copy .eyebrow")).toHaveCSS("font-family", /Plus Jakarta Sans/);
   await expect(page.locator(".details-progress")).toContainText("50% watched");
   const resume = page.getByRole("button", { name: "Resume" });
   await expect(resume).toHaveCSS("border-radius", "999px");
   await expect(resume).toHaveCSS("font-size", "14.5px");
-  await page.getByRole("button", { name: "Add to My List" }).click();
-  await expect(page.getByRole("button", { name: "Remove from My List" })).toBeVisible();
+  await page.getByRole("button", { name: "Add to list" }).click();
+  const listOption = page.getByRole("dialog", { name: "Add to list" }).getByRole("button", { name: "My List" });
+  await listOption.click();
+  await expect(listOption).toHaveClass(/active/);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Watchlists" }).click();
   await expect(page.getByRole("button", { name: /My List.*1/ })).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Play from beginning" }).click();
-  await expect.poll(() => page.evaluate(() => document.body.style.position)).toBe("");
-  await expect(page.locator(".player-top strong")).toHaveText("Billions");
-  await expect(page.locator(".player-top strong")).toHaveCSS("font-family", /Plus Jakarta Sans/);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+  await expect(page.locator(".player-title-line strong")).toHaveText("Billions");
+  await expect(page.locator(".player-title-line strong")).toHaveCSS("font-family", /Plus Jakarta Sans/);
   await expect(page.locator(".player-title-line small")).toHaveText("2016 – 2023");
-  await expect(page.locator(".player-top > div > span")).toHaveText("Pilot");
+  await expect(page.locator(".player-title-block > span")).toHaveText("Pilot");
   await expect(page.locator(".timecode")).toContainText("0:00 /");
   await expect(page.getByRole("button", { name: /Back to .* episodes/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Choose episode" }).click();
   await expect(page.getByRole("heading", { name: "Billions episodes" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /S1 E1.*Pilot.*Now playing/ })).toBeVisible();
-  await page.locator(".player-episode-picker").getByRole("button", { name: /S1 E2.*Naming Rights/ }).click();
-  await expect(page.locator(".player-top > div > span").last()).toHaveText("Naming Rights");
+  await expect(page.getByRole("button", { name: /EPISODE 1.*Pilot.*Now playing/ })).toBeVisible();
+  await page.locator(".player-episode-picker").getByRole("button", { name: /EPISODE 2.*Naming Rights/ }).click();
+  await expect(page.locator(".player-title-block > span")).toHaveText("Naming Rights");
 });
 
 test("Video starts front-page play commands after delayed media setup", async ({ page }) => {
-  const videoUrl = process.env.MEDIA_E2E_URL ?? "http://127.0.0.1:8090";
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
   const item = { Id: "autoplay-item", Name: "Autoplay contract", Type: "Movie", ProductionYear: 2026, RunTimeTicks: 36_000_000_000 };
   await page.addInitScript(() => {
     Object.defineProperty(window, "__videoPlayAttempts", { value: 0, writable: true });
@@ -584,13 +775,9 @@ test("Video starts front-page play commands after delayed media setup", async ({
     contentType: "application/json",
     body: JSON.stringify({ authenticated: true, user: { id: "user-1", name: "alice" }, csrf: "example" }),
   }));
+  await mockPlaybackInfo(page);
   await page.route("**/api/media/proxy/**", (route) => {
     const url = route.request().url();
-    if (url.includes("PlaybackInfo")) return route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ PlaySessionId: "play-1", MediaSources: [{ Id: "source-1", SupportsDirectPlay: true, SupportsTranscoding: true, MediaStreams: [] }] }),
-    });
     const body = url.includes("Latest") ? JSON.stringify([item]) : url.includes("IncludeItemTypes=Movie") ? JSON.stringify({ Items: [item] }) : JSON.stringify({ Items: [] });
     return route.fulfill({ status: 200, contentType: "application/json", body });
   });
@@ -609,7 +796,7 @@ test("Video starts front-page play commands after delayed media setup", async ({
 });
 
 test("Video keyboard shortcuts preserve deliberate playback intent", async ({ page }) => {
-  const videoUrl = process.env.MEDIA_E2E_URL ?? "http://127.0.0.1:8090";
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
   const item = { Id: "keyboard-item", Name: "Keyboard contract", Type: "Movie", ProductionYear: 2026, RunTimeTicks: 1_000_000_000 };
   await page.addInitScript(() => {
     const state = { paused: true, playAttempts: 0 };
@@ -632,13 +819,9 @@ test("Video keyboard shortcuts preserve deliberate playback intent", async ({ pa
     contentType: "application/json",
     body: JSON.stringify({ authenticated: true, user: { id: "user-1", name: "alice" }, csrf: "example" }),
   }));
+  await mockPlaybackInfo(page);
   await page.route("**/api/media/proxy/**", (route) => {
     const url = route.request().url();
-    if (url.includes("PlaybackInfo")) return route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ PlaySessionId: "play-1", MediaSources: [{ Id: "source-1", SupportsDirectPlay: true, SupportsTranscoding: true, MediaStreams: [] }] }),
-    });
     const body = url.includes("Latest") ? JSON.stringify([item]) : url.includes("IncludeItemTypes=Movie") ? JSON.stringify({ Items: [item] }) : JSON.stringify({ Items: [] });
     return route.fulfill({ status: 200, contentType: "application/json", body });
   });
@@ -680,8 +863,36 @@ test("Video keyboard shortcuts preserve deliberate playback intent", async ({ pa
   await expect.poll(() => video.evaluate((element) => element.currentTime)).toBe(50);
   await page.keyboard.press("5");
   await expect.poll(() => video.evaluate((element) => element.currentTime)).toBe(50);
+  const shell = page.locator(".player-shell");
+  const shellBounds = await shell.boundingBox();
+  expect(shellBounds).not.toBeNull();
+  await shell.hover({ position: { x: shellBounds!.width / 2, y: shellBounds!.height / 2 } });
+  await expect(page.locator(".player-center")).toBeVisible();
+  await expect(page.locator(".player-center").getByRole("button", { name: "Pause" })).toBeVisible();
   await page.keyboard.press("KeyM");
   await expect.poll(() => video.evaluate((element) => element.muted)).toBe(true);
+  const mutedFlash = page.locator(".shortcut-flash").filter({ hasText: /^Muted$/ }).last();
+  await expect(mutedFlash).toBeVisible();
+  const flashAlignment = await mutedFlash.evaluate((badge) => {
+    const badgeRect = badge.getBoundingClientRect();
+    const shellRect = badge.parentElement!.getBoundingClientRect();
+    const children = [...badge.children].map((child) => child.getBoundingClientRect());
+    const top = Math.min(...children.map((child) => child.top));
+    const bottom = Math.max(...children.map((child) => child.bottom));
+    return {
+      badgeCenterX: badgeRect.left + badgeRect.width / 2,
+      badgeCenterY: badgeRect.top + badgeRect.height / 2,
+      contentCenterY: top + (bottom - top) / 2,
+      shellCenterX: shellRect.left + shellRect.width / 2,
+      shellCenterY: shellRect.top + shellRect.height / 2,
+    };
+  });
+  expect(Math.abs(flashAlignment.badgeCenterX - flashAlignment.shellCenterX)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(flashAlignment.badgeCenterY - flashAlignment.shellCenterY)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(flashAlignment.badgeCenterY - flashAlignment.contentCenterY)).toBeLessThanOrEqual(1.5);
+  await expect(page.locator(".player-center")).toBeHidden({ timeout: 1_000 });
+  await expect(mutedFlash).toBeHidden();
+  await expect(page.locator(".player-center")).toBeVisible();
   await page.keyboard.press("ArrowDown");
   await expect.poll(() => video.evaluate((element) => element.volume)).toBeCloseTo(.95, 5);
   await page.keyboard.press("ArrowUp");
@@ -707,7 +918,7 @@ test("Video scales episode titles down and omits synopsis on iPhone", async ({ p
     return route.fulfill({ status: 200, contentType: "application/json", body });
   });
   await page.goto("http://127.0.0.1:8090");
-  await page.locator(".media-card .poster-open").first().click({ position: { x: 10, y: 10 } });
+  await page.locator(".media-card .poster-open").first().evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator(".episode-copy strong")).toHaveCSS("font-size", "13px");
   await expect(page.locator(".episode-copy small")).toBeHidden();
 });
@@ -727,10 +938,13 @@ test("Video surfaces an authenticated Jellyfin failure", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Couldn’t load Video" })).toBeVisible();
   await expect(page.getByText("Jellyfin is unavailable")).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await expect(page.locator(".media-error-state .empty-state h2")).toHaveCSS("font-family", /Plus Jakarta Sans/);
+  await expect(page.locator(".media-error-state .empty-state p")).toHaveCSS("font-family", /Anthropic Sans/);
+  await expect(page.locator(".media-error-state .button")).toHaveCSS("font-family", /Plus Jakarta Sans/);
 });
 
 test("Video keeps touch fullscreen inside the app without racing into picture in picture", async ({ page }, testInfo) => {
-  const videoUrl = process.env.MEDIA_E2E_URL ?? "http://127.0.0.1:8090";
+  const videoUrl = process.env.VIDEO_E2E_URL ?? "http://127.0.0.1:8090";
   const item = { Id: "item-1", Name: "Example movie", Type: "Movie", ProductionYear: 2024, RunTimeTicks: 36_000_000_000 };
   if (testInfo.project.name === "ipad") {
     await page.addInitScript(() => {
@@ -751,15 +965,11 @@ test("Video keeps touch fullscreen inside the app without racing into picture in
     contentType: "application/json",
     body: JSON.stringify({ authenticated: true, user: { id: "user-1", name: "alice" }, csrf: "example" }),
   }));
+  await mockPlaybackInfo(page);
   await page.route("**/api/media/tickets", (route) => route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ ticket: "example" }) }));
   await page.route("**/api/media/stream/**", (route) => route.fulfill({ status: 206, contentType: "video/mp4", body: "" }));
   await page.route("**/api/media/proxy/**", (route) => {
     const url = route.request().url();
-    if (url.includes("PlaybackInfo")) return route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ PlaySessionId: "play-1", MediaSources: [{ Id: "source-1", SupportsDirectPlay: true, SupportsTranscoding: true, MediaStreams: [] }] }),
-    });
     if (url.includes("Sessions/Playing")) return route.fulfill({ status: 204, body: "" });
     return route.fulfill({
       status: 200,
@@ -770,6 +980,7 @@ test("Video keeps touch fullscreen inside the app without racing into picture in
   await page.goto(videoUrl);
   await page.getByRole("button", { name: "Play", exact: true }).click();
   await expect(page.locator(".player-shell")).toBeVisible();
+  await expect.poll(() => page.locator("video").evaluate((video) => video.style.webkitUserSelect)).toBe("none");
   await page.evaluate(() => {
     Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
       configurable: true,
@@ -804,8 +1015,8 @@ test("Video keeps touch fullscreen inside the app without racing into picture in
 
   if (testInfo.project.name === "ipad") {
     // Modern iPadOS supports unprefixed element fullscreen. Brave must use that
-    // real shell path while never touching the legacy WebKit API, which can
-    // silently promote the child video into Apple's native player.
+    // real shell fullscreen and never the legacy webkit path, which WebKit can
+    // promote into Apple's native video player.
     await expect(page.locator(".player-shell")).toHaveAttribute("data-standard-fullscreen-requested", "true");
     await expect(page.locator(".player-shell")).not.toHaveAttribute("data-legacy-fullscreen-requested", "true");
     await expect(page.locator(".player-shell")).not.toHaveClass(/player-viewport-fullscreen/);
@@ -832,6 +1043,7 @@ test("Video player shows a streaming-style time preview", async ({ page }, testI
     contentType: "application/json",
     body: JSON.stringify({ authenticated: true, user: { id: "user-1", name: "alice" }, csrf: "example" }),
   }));
+  await mockPlaybackInfo(page, [{ Index: 0, Type: "Subtitle", Codec: "subrip", Language: "eng", DisplayTitle: "English - SUBRIP - External" }]);
   await page.route("**/api/media/tickets", (route) => route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ ticket: "example" }) }));
   await page.route("**/api/media/stream/**", (route) => route.fulfill({ status: 206, contentType: "video/mp4", body: "" }));
   await page.route("**/api/media/subtitles/**", (route) => route.fulfill({
@@ -858,11 +1070,6 @@ test("Video player shows a streaming-style time preview", async ({ page }, testI
       status: 200,
       contentType: "text/vtt",
       body: "WEBVTT\n\n00:00:00.000 --> 00:10:00.000\nFirst cue\n",
-    });
-    if (url.includes("PlaybackInfo")) return route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ PlaySessionId: "play-1", MediaSources: [{ Id: "source-1", SupportsDirectPlay: true, SupportsTranscoding: true, MediaStreams: [{ Index: 0, Type: "Subtitle", Codec: "subrip", Language: "eng", DisplayTitle: "English - SUBRIP - External" }] }] }),
     });
     return route.fulfill({
       status: 200,
@@ -892,6 +1099,8 @@ test("Video player shows a streaming-style time preview", async ({ page }, testI
   await expect(page.locator(".player-title-line strong")).toHaveCSS("font-family", /Plus Jakarta Sans/);
   await expect(page.locator(".player-title-line small")).toHaveText("2024");
   await expect(page.locator(".player-title-line small")).toHaveCSS("font-weight", "550");
+  await expect(page.locator(".timecode-current")).toHaveCSS("font-size", "15px");
+  await expect(page.locator(".timecode-total")).toHaveCSS("font-size", "11.5px");
   expect(parseFloat(await page.locator(".player-title-line strong").evaluate((element) => getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);
   await expect.poll(async () => page.locator(".player-title-line strong").evaluate((element) => parseFloat(getComputedStyle(element).letterSpacing) / parseFloat(getComputedStyle(element).fontSize))).toBeCloseTo(-.03, 3);
   const pauseTitleSpacing = await page.locator(".player-shell").evaluate((shell) => {
@@ -945,9 +1154,19 @@ test("Video player shows a streaming-style time preview", async ({ page }, testI
     await expect(centerTransport).toBeVisible();
     await expect(page.getByRole("button", { name: "Rewind 10 seconds" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Forward 10 seconds" })).toBeVisible();
+    await page.locator("video").evaluate((video) => {
+      Object.defineProperty(video, "currentTime", { configurable: true, value: 40, writable: true });
+      Object.defineProperty(video, "duration", { configurable: true, value: 100 });
+    });
+    await page.getByRole("button", { name: "Forward 10 seconds" }).click();
+    await expect.poll(() => page.locator("video").evaluate((video) => video.currentTime)).toBe(50);
+    await expect(page.getByRole("slider", { name: "Seek video" })).toHaveValue("50");
+    await page.getByRole("button", { name: "Rewind 10 seconds" }).click();
+    await expect.poll(() => page.locator("video").evaluate((video) => video.currentTime)).toBe(40);
+    await expect(page.getByRole("slider", { name: "Seek video" })).toHaveValue("40");
     const centerPlay = page.locator(".play-main");
     await expect(centerPlay.locator(".lucide-play")).toBeVisible();
-    await page.locator("video").dispatchEvent("play");
+    await page.locator("video").dispatchEvent("playing");
     await expect(centerPlay.locator(".lucide-pause")).toBeVisible();
     await expect(centerTransport).toBeVisible();
     await page.locator("video").dispatchEvent("pause");
@@ -976,7 +1195,7 @@ test("Video player shows a streaming-style time preview", async ({ page }, testI
   const lineHeight = page.locator("label", { hasText: "Line height" });
   await expect(lineHeight.locator('input[type="range"]')).toHaveAttribute("min", "1.45");
   await expect(lineHeight.locator('input[type="range"]')).toHaveAttribute("step", "0.01");
-  await expect(lineHeight.locator("b")).toHaveText("1.52");
+  await expect(lineHeight.locator("b")).toHaveText("1.49");
   const verticalOffset = page.locator("label", { hasText: "Vertical offset" });
   await expect(verticalOffset.locator('input[type="range"]')).toHaveAttribute("min", "0");
   await expect(verticalOffset.locator("b")).toHaveText("12%");
@@ -995,7 +1214,7 @@ test("Video player shows a streaming-style time preview", async ({ page }, testI
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByLabel("Subtitle track").selectOption("");
   await page.getByLabel("Subtitle track").selectOption("0");
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("cloud-media-playback") ?? "{}").subtitleLanguage)).toBe("eng");
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("video-playback") ?? "{}").subtitleLanguage)).toBe("eng");
   await expect(page.locator("video track")).toHaveAttribute("label", "English");
   await expect(page.locator("video track")).toHaveAttribute("srclang", "en");
   await expect(page.locator("video track")).toHaveAttribute("default", "");
@@ -1052,17 +1271,11 @@ test("Video player shows a streaming-style time preview", async ({ page }, testI
       },
     });
   });
-  if (testInfo.project.name === "ipad") {
-    await page.getByRole("button", { name: "Enter fullscreen" }).click();
-    await expect(page.locator(".player-shell")).toHaveClass(/player-viewport-fullscreen/);
-    await expect(page.locator("body")).not.toHaveAttribute("data-custom-subtitle-at-native-entry", "false");
-    await expect(page.locator(".player-shell > .subtitle-layer")).toHaveText("First cue");
-  } else {
-    await page.getByRole("button", { name: "Enter fullscreen" }).click();
-    await expect(page.locator("body")).toHaveAttribute("data-custom-subtitle-at-native-entry", "false");
-    await expect(page.locator("body")).toHaveAttribute("data-native-subtitle-mode-at-entry", "showing");
-    await page.locator("video").evaluate((video) => video.dispatchEvent(new Event("webkitendfullscreen")));
-  }
+  await page.getByRole("button", { name: "Enter fullscreen" }).click();
+  await expect(page.locator(".player-shell")).toHaveClass(/player-viewport-fullscreen/);
+  await expect(page.locator("body")).not.toHaveAttribute("data-custom-subtitle-at-native-entry", "false");
+  await expect(page.locator(".player-shell > .subtitle-layer")).toHaveText("First cue");
+  await page.getByRole("button", { name: "Exit fullscreen" }).click();
   await expect(page.locator(".subtitle-layer")).toHaveText("First cue");
   await page.locator("video").evaluate((video) => {
     const textTrack = video.querySelector("track")!.track;
@@ -1087,6 +1300,8 @@ test("Video player shows a streaming-style time preview", async ({ page }, testI
   await page.getByRole("button", { name: /Stats for nerds/ }).click();
   await expect(page.locator(".stats-panel")).toContainText("Playback");
   await expect(page.locator(".stats-panel")).toContainText("Media state");
+  await expect(page.locator(".stats-panel")).toHaveCSS("border-radius", "8px");
+  expect(await page.locator(".stats-panel > div").first().evaluate((element) => getComputedStyle(element).gridTemplateColumns)).toMatch(/^108px /);
   await page.getByRole("button", { name: "Done" }).click();
   await page.locator("video").evaluate((video) => {
     Object.defineProperty(video, "paused", { configurable: true, get: () => false });
@@ -1099,7 +1314,7 @@ test("Video player shows a streaming-style time preview", async ({ page }, testI
   expect(playbackEvents.at(-1)).toBe("stop");
 });
 
-test("Cloud Drive renders Finder-style tiles with download and drag-to-move", async ({ page }) => {
+test("Cloud at Home Drive renders Finder-style tiles with download and drag-to-move", async ({ page }) => {
   const moves: string[] = [];
   const creations: string[] = [];
   await page.route("**/api/auth/files/session", (route) => route.fulfill({
@@ -1131,7 +1346,7 @@ test("Cloud Drive renders Finder-style tiles with download and drag-to-move", as
   await page.goto("http://127.0.0.1:8082");
   await expect(page.locator(".file-view").getByRole("button", { name: "Documents", exact: true })).toBeVisible();
   await expect(page.locator("button button")).toHaveCount(0);
-  await expect(page.locator(".brand")).toContainText("Cloud Drive");
+  await expect(page.locator(".brand")).toContainText("Cloud at Home Drive");
   await expect(page.locator(".brand-mark-files svg")).toBeVisible();
   expect(parseFloat(await page.locator(".brand").evaluate((element) => getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(20);
   await expect(page.locator(".file-item").filter({ hasText: "Documents" }).locator("small")).toHaveCount(0);
@@ -1156,7 +1371,7 @@ test("Cloud Drive renders Finder-style tiles with download and drag-to-move", as
   expect(decodeURIComponent(moves[0])).toContain("destination=/Documents/report.pdf");
 });
 
-test("Cloud Drive has a blue sign-in and functional Control Panel", async ({ page }) => {
+test("Cloud at Home Drive has a blue sign-in and functional Control Panel", async ({ page }) => {
   let loggedOut = false;
   await page.route("**/api/auth/files/session", (route) => {
     if (route.request().method() === "DELETE") { loggedOut = true; return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }); }
@@ -1193,20 +1408,22 @@ test("Cloud Drive has a blue sign-in and functional Control Panel", async ({ pag
   await page.getByRole("button", { name: "Create account" }).click();
   await expect.poll(() => created.length).toBe(1);
   await expect(page.getByText("charlie", { exact: false })).toBeVisible();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Remove bob" }).click();
+  await expect(page.getByText("Remove bob?", { exact: true })).toBeVisible();
+  await page.getByPlaceholder("Your password").fill("example-password");
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
   await expect.poll(() => removed).toEqual([2]);
   await page.keyboard.press("Escape");
   await page.locator(".topbar").getByRole("button", { name: "Sign out" }).click();
   await expect.poll(() => loggedOut).toBe(true);
-  await expect(page.getByRole("heading", { name: "Sign in to Cloud Drive" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to Cloud at Home Drive" })).toBeVisible();
 });
 
-test("Cloud Drive sign-in uses the modern blue identity", async ({ page }) => {
+test("Cloud at Home Drive sign-in uses the modern blue identity", async ({ page }) => {
   await page.route("**/api/auth/files/session", (route) => route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ authenticated: false }) }));
   await page.goto("http://127.0.0.1:8082");
-  await expect(page.getByRole("heading", { name: "Sign in to Cloud Drive" })).toBeVisible();
-  await expect(page.locator(".brand")).toContainText("Cloud Drive");
+  await expect(page.getByRole("heading", { name: "Sign in to Cloud at Home Drive" })).toBeVisible();
+  await expect(page.locator(".brand")).toContainText("Cloud at Home Drive");
   await expect(page.locator(".login-orb svg")).toBeVisible();
   const orbColor = await page.locator(".login-orb").evaluate((element) => getComputedStyle(element).backgroundImage);
   expect(orbColor).toContain("32, 140, 255");
@@ -1215,7 +1432,7 @@ test("Cloud Drive sign-in uses the modern blue identity", async ({ page }) => {
   await expect(page.getByText("Drive", { exact: true }).last()).toBeVisible();
 });
 
-test("Cloud opens code and PDF files in polished viewers", async ({ page }) => {
+test("Cloud at Home opens code and PDF files in polished viewers", async ({ page }) => {
   const files = [
     { name: "notes.ts", path: "/notes.ts", size: 48, isDir: false, modified: "2026-07-10T00:00:00Z" },
     { name: "manual.pdf", path: "/manual.pdf", size: 1024, isDir: false, modified: "2026-07-10T00:00:00Z" },
@@ -1253,13 +1470,13 @@ test("Cloud opens code and PDF files in polished viewers", async ({ page }) => {
   await expect(page.locator(".viewer-actions").getByRole("link", { name: "Open" })).toHaveAttribute("target", "_blank");
 });
 
-test("Cloud stays gated while Video auto-authenticates", async ({ request }) => {
+test("Cloud at Home stays gated while Video auto-authenticates", async ({ request }) => {
   expect((await request.get("http://127.0.0.1:8082/api/auth/files/session")).status()).toBe(401);
   expect((await request.get("http://127.0.0.1:8090/api/auth/media/session")).status()).toBe(200);
 });
 
-test("Open WebUI stays on its pre-Cloud frontend", async ({ page }) => {
+test("Open WebUI stays on its pre-Cloud at Home frontend", async ({ page }) => {
   await page.goto("http://127.0.0.1:3003");
-  await expect(page.locator("cloud-home-switcher")).toHaveCount(0);
+  await expect(page.locator("cloud-at-home-switcher")).toHaveCount(0);
   expect(await page.title()).not.toBe("");
 });

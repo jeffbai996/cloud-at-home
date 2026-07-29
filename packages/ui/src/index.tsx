@@ -6,6 +6,7 @@ import {
   Cloud,
   Database,
   Files,
+  Images,
   Moon,
   Play,
   Sparkles,
@@ -17,15 +18,20 @@ import { useEffect, useState } from "react";
 
 import { applyTheme, readTheme, serviceHref, type CloudHomeTheme } from "./theme";
 
-export { applyTheme, readTheme, writeTheme, type CloudHomeTheme } from "./theme";
+export { applyTheme, readTheme, serviceHref, writeTheme, type CloudHomeTheme } from "./theme";
+export { DropdownMenu };
+export {
+  Lightbox, clampLightboxIndex, lightboxKindFor, type LightboxItem,
+} from "./lightbox";
 
-export type AppKind = "media" | "files" | "ai";
+export type AppKind = "media" | "files" | "photos" | "ai";
 type ServiceKind = AppKind | "extra";
 
 const apps = [
-  { id: "media" as const, label: "Video", icon: Play, localPort: 8090, tailnetPort: 8453 },
-  { id: "files" as const, label: "Drive", icon: Files, localPort: 8082, tailnetPort: 8454 },
-  { id: "ai" as const, label: "Local AI", icon: Bot, localPort: 3003, tailnetPort: 8445 },
+  { id: "media" as const, label: "Video", icon: Play, localPort: 8090, tailnetPort: 8453, forceHttp: false },
+  { id: "files" as const, label: "Drive", icon: Files, localPort: 8082, tailnetPort: 8454, forceHttp: false },
+  { id: "photos" as const, label: "Photos", icon: Images, localPort: 8083, tailnetPort: 8458, forceHttp: false },
+  { id: "ai" as const, label: "Local AI", icon: Bot, localPort: 3003, tailnetPort: 8445, forceHttp: false },
 ];
 
 export function AppSwitcher({
@@ -58,7 +64,9 @@ export function AppSwitcher({
             const Icon = app.icon;
             const host = typeof window === "undefined" ? "localhost" : window.location.hostname;
             const secure = typeof window !== "undefined" && window.location.protocol === "https:";
-            const href = urls[app.id] ?? serviceHref(host, app.localPort, app.tailnetPort, secure);
+            const href = urls[app.id] ?? (app.forceHttp
+              ? `http://${host}:${app.localPort}`
+              : serviceHref(host, app.localPort, app.tailnetPort, secure));
             return (
               <DropdownMenu.Item key={app.id} asChild>
                 <a className="dropdown-item app-switcher-item" data-active={current === app.id} href={href}>
@@ -84,10 +92,20 @@ export function AppSwitcher({
   );
 }
 
+// The mark used to draw in a 0 0 100 100 box, where its ink lands at 55.4,
+// 57.6 — low and right of centre, since a cloud hangs below its own top arc —
+// and fills only ~64x49 of the box. Beside a centred, box-filling lucide moon
+// it read as both off-axis and a size small; the old CSS translate nudges were
+// chasing the first half of that. This window is a square crop centred on the
+// ink instead, so the glyph centres itself and comes out ~16px wide with a
+// ~1.5px stroke at 24px — the moon's proportions. Do not grow the element past
+// 24px: `.icon-button` has a 24px content box, and an overflowing grid item
+// pins left instead of centring. Ported by hand to apps/music and apps/games —
+// same mark, keep it in step there.
 function CloudMark() {
   return (
-    <svg className="cloud-cloud-mark" width="22" height="22" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-      <path d="M78 55a18 18 0 0 0-35.5-4.5A14 14 0 1 0 44 78h34a14 14 0 0 0 0-23z" stroke="currentColor" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
+    <svg className="cloud-home-cloud-mark" width="24" height="24" viewBox="7.9 10 95 95" fill="none" aria-hidden="true">
+      <path d="M78 55a18 18 0 0 0-35.5-4.5A14 14 0 1 0 44 78h34a14 14 0 0 0 0-23z" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -141,7 +159,7 @@ export function AppShell({
   headerCollapsed?: boolean;
   headerAutoHidden?: boolean;
 }) {
-  const BrandIcon = kind === "media" ? Clapperboard : kind === "files" ? Cloud : Sparkles;
+  const BrandIcon = kind === "media" ? Clapperboard : kind === "files" ? Cloud : kind === "photos" ? Images : Sparkles;
   return (
     <div className={`app app-${kind} ${headerCollapsed ? "app-header-collapsed" : ""} ${headerAutoHidden ? "app-header-auto-hidden" : ""}`}>
       <header className="topbar">
@@ -191,11 +209,11 @@ export function LoginView({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: "spring", stiffness: 260, damping: 24 }}
       >
-        <div className="login-orb">{service.includes("Cloud") ? <Cloud size={27} /> : <Sparkles size={26} />}</div>
+        <div className="login-orb">{service.includes("Cloud at Home") ? <Cloud size={27} /> : <Sparkles size={26} />}</div>
         <div>
           <div className="eyebrow">Secure personal storage</div>
           <h1>Sign in to {service}</h1>
-          <p>{service.includes("Cloud") ? "Your files, tools, and shared spaces—available from one private drive." : "Your existing account, minus the existing interface."}</p>
+          <p>{service.includes("Cloud at Home") ? "Your files, tools, and shared spaces—available from one private drive." : "Your existing account, minus the existing interface."}</p>
         </div>
         <label>
           <span>Username</span>

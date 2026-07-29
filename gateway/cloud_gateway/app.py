@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
 import os
-import secrets
 import re
+import secrets
+import threading
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
+import requests
 from flask import Flask, Response, jsonify, redirect, request
 from requests import RequestException
 
@@ -21,11 +24,13 @@ from .sessions import Session, SessionStore, TokenVault
 from .trash import TrashStore
 from .stream_tickets import StreamTicketStore, rewrite_hls_playlist
 from .subtitles import normalize_vtt
+from .playback import sanitize_playback_info
 
 
 COOKIE_NAMES = {
     "media": "cloud-home_media_session",
     "files": "cloud-home_files_session",
+    "photos": "cloud-home_photos_session",
 }
 STATE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 MAX_BUFFERED_PROXY_BODY = 2 * 1024 * 1024
@@ -44,6 +49,9 @@ def create_app(
         JELLYFIN_URL=os.environ.get("JELLYFIN_URL", "http://127.0.0.1:8096"),
         MEDIA_AUTO_LOGIN_USERNAME=os.environ.get("MEDIA_AUTO_LOGIN_USERNAME", ""),
         MEDIA_AUTO_LOGIN_PASSWORD=os.environ.get("MEDIA_AUTO_LOGIN_PASSWORD", ""),
+        PHOTOS_AUTO_LOGIN_USERNAME=os.environ.get("PHOTOS_AUTO_LOGIN_USERNAME", ""),
+        PHOTOS_AUTO_LOGIN_PASSWORD=os.environ.get("PHOTOS_AUTO_LOGIN_PASSWORD", ""),
+        PHOTOS_ROOT=os.environ.get("PHOTOS_ROOT", "photos"),
         FILEBROWSER_URL=os.environ.get("FILEBROWSER_URL", "http://127.0.0.1:8080"),
         EXTRA_SERVICE_LABEL=os.environ.get("CLOUD_HOME_EXTRA_SERVICE_LABEL", ""),
         EXTRA_SERVICE_URL=os.environ.get("CLOUD_HOME_EXTRA_SERVICE_URL", ""),
@@ -62,9 +70,17 @@ def create_app(
     services = dict(adapters or {
         "media": JellyfinAdapter(app.config["JELLYFIN_URL"]),
         "files": FileBrowserAdapter(app.config["FILEBROWSER_URL"]),
+        # Same upstream as files; the photos POLICY is the boundary that
+        # makes the login-free Photos app read-only and library-scoped.
+        "photos": FileBrowserAdapter(app.config["FILEBROWSER_URL"]),
     })
-    policies = {"media": ProxyPolicy.media(), "files": ProxyPolicy.files()}
-    app.extensions["cloud-home"] = {
+    policies = {
+        "media": ProxyPolicy.media(),
+        "files": ProxyPolicy.files(),
+        "photos": ProxyPolicy.photos(str(app.config["PHOTOS_ROOT"])),
+    }
+    media_refresh_lock = threading.Lock()
+    app.extensions["cloud-at-home"] = {
         "database": database,
         "sessions": sessions,
         "preferences": preferences,
@@ -114,6 +130,59 @@ def create_app(
         )
         return session_response("media", session)
 
+    def auto_login_photos() -> Response | None:
+        username = str(app.config["PHOTOS_AUTO_LOGIN_USERNAME"])
+        password = str(app.config["PHOTOS_AUTO_LOGIN_PASSWORD"])
+        if not username or not password:
+            return None
+        try:
+            result = services["photos"].login(username, password)
+        except UpstreamError as exc:
+            return jsonify({"error": str(exc)}), exc.status
+        session = sessions.create(
+            service="photos",
+            token=result.token,
+            user_id=result.user_id,
+            username=result.username,
+        )
+        return session_response("photos", session)
+
+    def refresh_media_session(failed_session: Session) -> Session | None:
+        """Refresh once per stale token while preserving the gateway cookie."""
+        username = str(app.config["MEDIA_AUTO_LOGIN_USERNAME"])
+        password = str(app.config["MEDIA_AUTO_LOGIN_PASSWORD"])
+        if not username or not password:
+            return None
+        with media_refresh_lock:
+            current = sessions.get(failed_session.id, "media")
+            if current is None:
+                return None
+            # Another HLS worker refreshed while this request waited.
+            if current.token != failed_session.token:
+                return current
+            result = services["media"].login(username, password)
+            return sessions.update_token(current.id, "media", result.token)
+
+    def drain_upstream(response: UpstreamResponse) -> None:
+        if not isinstance(response.body, bytes):
+            for _chunk in response.body:
+                pass
+
+    def media_request_with_refresh(
+        session: Session,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> tuple[UpstreamResponse, Session]:
+        response = services["media"].request(session.token, method, path, **kwargs)
+        if response.status != 401:
+            return response, session
+        drain_upstream(response)
+        refreshed = refresh_media_session(session)
+        if refreshed is None:
+            return response, session
+        return services["media"].request(refreshed.token, method, path, **kwargs), refreshed
+
     @app.after_request
     def security_headers(response: Response) -> Response:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -137,7 +206,10 @@ def create_app(
         destination = str(app.config["EXTRA_SERVICE_URL"]).strip()
         if not label or not destination.startswith("https://"):
             return jsonify({"error": "extra service is not configured"}), 404
-        return jsonify({"label": label, "href": "/api/navigation/extra-service/open"})
+        return jsonify({
+            "label": label,
+            "href": "/api/navigation/extra-service/open",
+        })
 
     @app.get("/api/navigation/extra-service/open")
     def extra_service_navigation() -> Response:
@@ -172,25 +244,58 @@ def create_app(
         if service not in services:
             return jsonify({"error": "unknown service"}), 404
         session = current_session(service)
+        invalidated_cookie = False
+        if session is not None and service == "photos":
+            try:
+                # FileBrowser 2.63 can answer with 500 instead of 401 after a
+                # user or token is replaced. Probe the user's virtual root:
+                # unlike the configured photos folder, it must exist for every
+                # valid FileBrowser session regardless of that user's scope.
+                validation = services["photos"].request(
+                    session.token, "GET", "api/resources/",
+                )
+                drain_upstream(validation)
+            except (UpstreamError, RequestException) as exc:
+                status = exc.status if isinstance(exc, UpstreamError) else 502
+                return jsonify({"error": "FileBrowser session validation failed"}), status
+            if validation.status >= 400:
+                sessions.delete(session.id, "photos")
+                session = None
+                invalidated_cookie = True
         if session is not None and service == "media" and app.config["MEDIA_AUTO_LOGIN_USERNAME"]:
             try:
                 validation = services["media"].request(session.token, "GET", f"Users/{session.user_id}")
-            except UpstreamError as exc:
-                return jsonify({"error": str(exc)}), exc.status
-            if not isinstance(validation.body, bytes):
-                for _chunk in validation.body:
-                    pass
-            if validation.status == 401:
+                if not isinstance(validation.body, bytes):
+                    for _chunk in validation.body:
+                        pass
+                status = validation.status
+            except (UpstreamError, RequestException):
+                # Jellyfin restarting does not always reject the old token with
+                # a clean 401 — it can accept the connection and then reset it
+                # mid-body. Treating that as fatal left Video down until the
+                # session row was cleared by hand. Credentials are on file, so
+                # an unverifiable session is simply a session to replace; if
+                # Jellyfin really is gone, the login below fails and says so.
+                status = 401
+            if status == 401:
                 sessions.delete(session.id, "media")
                 session = None
-            elif validation.status >= 400:
-                return jsonify({"error": "Jellyfin session validation failed"}), validation.status
+            elif status >= 400:
+                return jsonify({"error": "Jellyfin session validation failed"}), status
         if session is None:
             if service == "media":
                 response = auto_login_media()
                 if response is not None:
                     return response
-            return jsonify({"authenticated": False}), 401
+            if service == "photos":
+                response = auto_login_photos()
+                if response is not None:
+                    return response
+            response = jsonify({"authenticated": False})
+            response.status_code = 401
+            if invalidated_cookie:
+                response.delete_cookie(COOKIE_NAMES[service], path="/")
+            return response
         return session_response(service, session)
 
     @app.delete("/api/auth/<service>/session")
@@ -214,7 +319,11 @@ def create_app(
             return error
         try:
             safe_path = policies[service].validate(request.method, upstream)
-            prefix = "api/" if service == "files" else ""
+            if service == "media" and safe_path.rstrip("/").split("/")[-1].lower() == "playbackinfo":
+                # PlaybackInfo contains upstream URLs, access tokens, and local
+                # paths. The typed route below returns the browser-safe subset.
+                raise ValueError("use the playback endpoint")
+            prefix = "api/" if service in {"files", "photos"} else ""
             forwarded_headers = {
                 key: value for key, value in request.headers.items()
                 if key.lower() in {"content-type", "range", "accept", "if-match", "if-unmodified-since"}
@@ -227,14 +336,19 @@ def create_app(
                     body = request.stream
                     if request.content_length is not None:
                         forwarded_headers["Content-Length"] = str(request.content_length)
-            upstream_response = services[service].request(
-                session.token,
-                request.method,
-                prefix + safe_path,
-                query=request.query_string,
-                headers=forwarded_headers,
-                data=body,
-            )
+            request_kwargs = {
+                "query": request.query_string,
+                "headers": forwarded_headers,
+                "data": body,
+            }
+            if service == "media":
+                upstream_response, session = media_request_with_refresh(
+                    session, request.method, prefix + safe_path, **request_kwargs,
+                )
+            else:
+                upstream_response = services[service].request(
+                    session.token, request.method, prefix + safe_path, **request_kwargs,
+                )
         except ValueError:
             return jsonify({"error": "upstream request is not allowed"}), 403
         except UpstreamError as exc:
@@ -274,6 +388,30 @@ def create_app(
             return jsonify(preferences.get(key))
         return jsonify(preferences.put(key, request.get_json(silent=True) or {}))
 
+    @app.post("/api/photos/upload/<path:destination>")
+    def upload_photo(destination: str) -> Response:
+        session, error = authenticated("files")
+        if error:
+            return error
+        root = str(app.config["PHOTOS_ROOT"]).strip("/")
+        clean = destination.strip("/")
+        if clean == root or not clean.startswith(f"{root}/"):
+            return jsonify({"error": "destination escapes the photo library"}), 400
+        try:
+            uploaded = services["files"].request(
+                session.token, "POST",
+                f"api/resources/{quote(clean, safe='/')}?override=false",
+                headers={"Content-Type": request.content_type or "application/octet-stream"},
+                data=request.stream,
+            )
+        except UpstreamError as exc:
+            return jsonify({"error": str(exc)}), exc.status
+        return Response(
+            uploaded.body, status=uploaded.status,
+            headers=dict(uploaded.headers),
+            direct_passthrough=not isinstance(uploaded.body, bytes),
+        )
+
     @app.get("/api/media/subtitles/<item_id>/<source_id>/<int:stream_index>.vtt")
     def media_subtitle(item_id: str, source_id: str, stream_index: int) -> Response:
         session, error = authenticated("media")
@@ -282,8 +420,8 @@ def create_app(
         if not all(re.fullmatch(r"[A-Za-z0-9-]{8,64}", value) for value in (item_id, source_id)):
             return jsonify({"error": "invalid subtitle source"}), 400
         try:
-            upstream = services["media"].request(
-                session.token,
+            upstream, session = media_request_with_refresh(
+                session,
                 "GET",
                 f"Videos/{item_id}/{source_id}/Subtitles/{stream_index}/Stream.vtt",
             )
@@ -302,6 +440,50 @@ def create_app(
             headers={"Cache-Control": "private, max-age=300"},
         )
 
+    @app.post("/api/media/items/<item_id>/playback")
+    def media_playback_info(item_id: str) -> Response:
+        session, error = authenticated("media")
+        if error:
+            return error
+        if not re.fullmatch(r"[A-Za-z0-9-]{8,64}", item_id):
+            return jsonify({"error": "invalid media item"}), 400
+        payload = request.get_json(silent=True) or {}
+        device_profile = payload.get("DeviceProfile")
+        if device_profile is not None and not isinstance(device_profile, dict):
+            return jsonify({"error": "invalid device profile"}), 400
+        # Direct play/stream are OFF at the gateway too, not just in the client
+        # profile: a direct-play response is the whole file as ONE unbounded
+        # request, and a paused/slept client pins a waitress worker at the
+        # output high-watermark with no timeout. Enough of those exhausted the
+        # pool (2026-07-26 outage). HLS keeps every request segment-sized;
+        # compatible codecs are remuxed, not transcoded.
+        upstream_payload: dict[str, Any] = {
+            "UserId": session.user_id,
+            "EnableDirectPlay": False,
+            "EnableDirectStream": False,
+            "EnableTranscoding": True,
+            "SubtitleStreamIndex": -1,
+        }
+        if device_profile is not None:
+            upstream_payload["DeviceProfile"] = device_profile
+        try:
+            upstream, session = media_request_with_refresh(
+                session,
+                "POST",
+                f"Items/{item_id}/PlaybackInfo",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(upstream_payload).encode("utf-8"),
+            )
+        except UpstreamError as exc:
+            return jsonify({"error": str(exc)}), exc.status
+        raw = upstream.body if isinstance(upstream.body, bytes) else b"".join(upstream.body)
+        if upstream.status != 200:
+            return jsonify({"error": "Jellyfin playback information is unavailable"}), upstream.status
+        try:
+            return jsonify(sanitize_playback_info(json.loads(raw)))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return jsonify({"error": "invalid Jellyfin playback response"}), 502
+
     @app.post("/api/media/tickets")
     def media_ticket_create() -> Response:
         session, error = authenticated("media")
@@ -311,7 +493,7 @@ def create_app(
         item_id = payload.get("itemId")
         if not isinstance(item_id, str) or not re.fullmatch(r"[A-Za-z0-9-]{8,64}", item_id):
             return jsonify({"error": "invalid media item"}), 400
-        ticket = tickets.create(token=session.token, item_id=item_id)
+        ticket = tickets.create(session_id=session.id, item_id=item_id)
         return jsonify({"ticket": ticket.id, "expiresAt": ticket.expires_at.isoformat()}), 201
 
     @app.get("/api/media/stream/<ticket_id>/<path:upstream>")
@@ -325,6 +507,9 @@ def create_app(
         ticket = tickets.get(ticket_id, item_id)
         if ticket is None:
             return jsonify({"error": "stream ticket expired or invalid"}), 403
+        session = sessions.get(ticket.session_id, "media")
+        if session is None:
+            return jsonify({"error": "stream ticket session expired"}), 403
         forwarded_headers = {
             key: value for key, value in request.headers.items()
             if key.lower() in {"range", "accept"}
@@ -332,18 +517,20 @@ def create_app(
 
         def fetch_upstream() -> UpstreamResponse:
             safe_path = policies["media"].validate("GET", upstream)
-            return services["media"].request(
-                ticket.token,
-                "GET",
-                safe_path,
-                query=request.query_string,
-                headers=forwarded_headers,
+            nonlocal session
+            response, session = media_request_with_refresh(
+                session, "GET", safe_path,
+                query=request.query_string, headers=forwarded_headers,
             )
+            return response
 
         try:
             upstream_response = fetch_upstream()
         except (ValueError, UpstreamError):
             return jsonify({"error": "media stream unavailable"}), 502
+        if upstream_response.status == 401:
+            drain_upstream(upstream_response)
+            return jsonify({"error": "media stream authentication failed"}), 502
         content_type = upstream_response.headers.get("Content-Type", "")
         is_playlist = upstream.endswith(".m3u8") or "mpegurl" in content_type.lower()
         should_buffer = is_playlist or upstream.endswith((".ts", ".m4s"))
@@ -415,15 +602,15 @@ def create_app(
             source = normalize_virtual_path(payload.get("path", ""))
         except ValueError:
             return jsonify({"error": "invalid path"}), 400
-        if source == "/" or source.startswith("/.cloud-home-trash"):
+        if source == "/" or source.startswith("/.cloud-at-home-trash"):
             return jsonify({"error": "this path cannot be trashed"}), 400
         entry_id = secrets.token_urlsafe(12)
         name = PurePosixPath(source).name
-        destination = f"/.cloud-home-trash/{entry_id}/{name}"
-        root = file_mutation(session, "POST", "/.cloud-home-trash/?override=false")
+        destination = f"/.cloud-at-home-trash/{entry_id}/{name}"
+        root = file_mutation(session, "POST", "/.cloud-at-home-trash/?override=false")
         if root.status not in {200, 201, 204, 409}:
             return jsonify({"error": "could not create trash root"}), 502
-        mkdir = file_mutation(session, "POST", f"/.cloud-home-trash/{entry_id}/?override=false")
+        mkdir = file_mutation(session, "POST", f"/.cloud-at-home-trash/{entry_id}/?override=false")
         if mkdir.status not in {200, 201, 204, 409}:
             return jsonify({"error": "could not create trash container"}), 502
         query = (
@@ -484,7 +671,9 @@ def create_app(
 def main() -> None:
     from waitress import serve
 
-    serve(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8079")), threads=8)
+    # 16 threads is headroom, not the fix — the fix is that no request is
+    # unbounded anymore (HLS segments only, see media_playback_info).
+    serve(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8079")), threads=16)
 
 
 if __name__ == "__main__":

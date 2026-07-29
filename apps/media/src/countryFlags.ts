@@ -1,4 +1,8 @@
-const bundledCountryFlags = new Set(["US", "CA", "GB", "JP", "CN", "HK", "KR", "FR", "DE", "AU"]);
+const bundledCountryFlags = new Set([
+  "US", "CA", "GB", "JP", "CN", "HK", "KR", "FR", "DE", "AU", "CH",
+  "NZ", "IN", "PL", "FI", "NL", "ES", "CZ", "ZA",
+  "AR",
+]);
 
 export function countryFlagPath(code?: string): string | undefined {
   const normalized = code?.toUpperCase();

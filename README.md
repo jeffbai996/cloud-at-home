@@ -1,6 +1,6 @@
 # cloud-at-home
 
-![Version](https://img.shields.io/badge/version-0.3.0-208cff?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.4.0-208cff?style=flat-square)
 ![Stage](https://img.shields.io/badge/stage-alpha-334155?style=flat-square)
 ![Self-hosted](https://img.shields.io/badge/deployment-self--hosted-0f766e?style=flat-square)
 ![TypeScript](https://img.shields.io/badge/frontend-TypeScript-3178c6?style=flat-square)
@@ -12,10 +12,11 @@
 
 Self-hosted web applications backed by established services:
 
-- **Video** — a custom Jellyfin client with profiles, resume history, subtitles, favorites, lists, search, classification and country metadata, and hardened cross-device playback
-- **Cloud Drive** — a Finder-style FileBrowser client with editing, previews, transfers, quick-access pins, file details, user controls, and recoverable trash
-- **Service switcher** — navigation between video, files, local AI, and optional services
-- **Gateway** — encrypted upstream sessions, scoped proxy policies, preferences, playback tickets, same-origin subtitle delivery, and trash metadata
+- **Video** — a custom Jellyfin client with profiles, resume history, lists, subtitles, keyboard controls, responsive fullscreen, bounded HLS streaming, and faithful regional classification marks
+- **Cloud Drive** — a Finder-style FileBrowser client with editing, previews, bulk selection, transfers, quick-access pins, file details, shared media lightboxes, and recoverable trash
+- **Photos** — a responsive photo timeline with albums, search, deep-linked lightboxes, direct uploads, Drive imports, and library organization tools
+- **Service switcher** — shared navigation and themes across Video, Drive, Photos, local AI, and optional services
+- **Gateway** — encrypted upstream sessions, scoped read/write proxy policies, preferences, playback tickets, same-origin media delivery, and session recovery
 
 ## Preview
 
@@ -31,11 +32,11 @@ Self-hosted web applications backed by established services:
 
 <sub><em>Preview, edit, transfer, and recover files from a Finder-style interface.</em></sub>
 
-### Home server deployment
+### Video details
 
 ![Video running on a home server](docs/images/cloud-at-home-hero.jpeg)
 
-<sub><em>A live home-server deployment backed by Jellyfin.</em></sub>
+<sub><em>Rich metadata, regional classification marks, and playback controls without leaving the library.</em></sub>
 
 ## Architecture
 
@@ -43,8 +44,9 @@ The React applications authenticate through a Flask gateway. Jellyfin and
 FileBrowser remain the authorities for users, permissions, media, and files.
 
 ```text
-Browser -> Video / Cloud Drive -> Gateway -> Jellyfin / FileBrowser
-                                -> SQLite
+Browser -> Video ---------> Gateway -> Jellyfin
+        -> Drive / Photos -> Gateway -> FileBrowser
+                             Gateway -> SQLite
 ```
 
 ## Run locally
@@ -57,6 +59,7 @@ npm test
 gateway/venv/bin/python -m pytest gateway/tests
 npm run dev:media
 npm run dev:files
+npm run dev:photos
 ```
 
 ## Deployment

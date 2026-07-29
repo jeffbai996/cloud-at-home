@@ -33,7 +33,6 @@ export function setSessionLostHandler(fn: () => void): void { onSessionLost = fn
 async function request(url: string, options: RequestInit = {}, expectJson = true) {
   const headers = new Headers(options.headers);
   if (csrf && options.method && options.method !== "GET") headers.set("X-CSRF-Token", csrf);
-  if (options.body && typeof options.body === "string") headers.set("Content-Type", "application/json");
   const response = await fetch(url, { ...options, headers, credentials: "include" });
   if (!response.ok) {
     // Not for the initial session probe — that 401 just means "show login".
@@ -42,6 +41,12 @@ async function request(url: string, options: RequestInit = {}, expectJson = true
     throw new Error(payload.error ?? "Request failed");
   }
   return expectJson ? response.json() : response;
+}
+
+function jsonRequest(url: string, options: RequestInit = {}, expectJson = true) {
+  const headers = new Headers(options.headers);
+  headers.set("Content-Type", "application/json");
+  return request(url, { ...options, headers }, expectJson);
 }
 
 export async function getSession(): Promise<Session | null> {
@@ -53,7 +58,7 @@ export async function getSession(): Promise<Session | null> {
 }
 
 export async function login(username: string, password: string): Promise<Session> {
-  const session = await request("/api/auth/files/login", { method: "POST", body: JSON.stringify({ username, password }) }) as Session;
+  const session = await jsonRequest("/api/auth/files/login", { method: "POST", body: JSON.stringify({ username, password }) }) as Session;
   csrf = session.csrf;
   return session;
 }
@@ -71,8 +76,18 @@ export function rawUrl(path: string, inline = true): string {
   return `/api/files/proxy/raw${encodedPath(path)}${inline ? "?inline=true" : ""}`;
 }
 
-export async function getResource(path: string): Promise<Resource> {
-  return request(`/api/files/proxy/resources${encodedPath(path)}`) as Promise<Resource>;
+// Server-made JPEG previews (FileBrowser). The grid used to ship full-size
+// originals as thumbnails — slow, and HEIC never rendered at all.
+export function previewThumbUrl(path: string): string {
+  return `/api/files/proxy/preview/thumb${encodedPath(path)}`;
+}
+
+export function previewBigUrl(path: string): string {
+  return `/api/files/proxy/preview/big${encodedPath(path)}`;
+}
+
+export async function getResource(path: string, signal?: AbortSignal): Promise<Resource> {
+  return request(`/api/files/proxy/resources${encodedPath(path)}`, { signal }) as Promise<Resource>;
 }
 
 export async function getText(path: string): Promise<{ text: string; etag: string | null; modified: string | null }> {
@@ -82,6 +97,7 @@ export async function getText(path: string): Promise<{ text: string; etag: strin
 
 export async function saveText(path: string, text: string, etag?: string | null): Promise<{ etag: string | null; modified: string | null }> {
   const headers = new Headers();
+  headers.set("Content-Type", "text/plain; charset=utf-8");
   if (etag) headers.set("If-Match", etag);
   const response = await request(`/api/files/proxy/resources${encodedPath(path)}`, { method: "PUT", body: text, headers }, false) as Response;
   return { etag: response.headers.get("ETag") ?? etag ?? null, modified: response.headers.get("Last-Modified") };
@@ -112,7 +128,7 @@ export async function uploadFile(directory: string, file: File, onProgress?: (va
 }
 
 export async function trash(path: string, size: number): Promise<void> {
-  await request("/api/files/trash", { method: "POST", body: JSON.stringify({ path, size }) });
+  await jsonRequest("/api/files/trash", { method: "POST", body: JSON.stringify({ path, size }) });
 }
 
 export async function listTrash(): Promise<TrashEntry[]> {
@@ -132,7 +148,7 @@ export async function adminResource<T>(path: string, options: RequestInit = {}):
 }
 
 export async function createUser(username: string, password: string, admin: boolean): Promise<void> {
-  await adminResource("users", {
+  await jsonRequest("/api/files/proxy/users", {
     method: "POST",
     body: JSON.stringify({
       username,
@@ -150,7 +166,7 @@ export async function createUser(username: string, password: string, admin: bool
 }
 
 export async function deleteUser(id: number, currentPassword: string): Promise<void> {
-  await request(`/api/files/proxy/users/${id}`, {
+  await jsonRequest(`/api/files/proxy/users/${id}`, {
     method: "DELETE",
     body: JSON.stringify({ current_password: currentPassword }),
   }, false);

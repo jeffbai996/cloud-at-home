@@ -13,9 +13,9 @@ def test_stream_ticket_is_item_scoped_encrypted_and_expires(tmp_path) -> None:
     database = Database(tmp_path / "state.db")
     store = StreamTicketStore(database, TokenVault(Fernet.generate_key().decode()))
     now = datetime(2026, 7, 10, tzinfo=timezone.utc)
-    ticket = store.create(token="jellyfin-token", item_id="item-1", now=now)
+    ticket = store.create(session_id="gateway-session", item_id="item-1", now=now)
 
-    assert b"jellyfin-token" not in (tmp_path / "state.db").read_bytes()
+    assert b"gateway-session" not in (tmp_path / "state.db").read_bytes()
     assert store.get(ticket.id, "item-1", now=now) == ticket
     assert store.get(ticket.id, "item-2", now=now) is None
     assert store.get(ticket.id, "item-1", now=now + timedelta(hours=7)) is None

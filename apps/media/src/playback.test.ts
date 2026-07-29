@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionLineHeight, captionPrefsVersion, captionVerticalOffset, formatPlaybackStats, fullscreenStrategy, isPlaybackToggleKey, isResumable, mediaYearLabel, migrateCaptionDefaults, pauseCinemaDelays, pauseCinemaVisible, pauseSynopsisDurationSeconds, playbackStartPosition, playerKeyboardAction, playerTitleOwners, prefersViewportFullscreen, progressEvents, resumePosition, shouldArmTitleTimer, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, titleDisplayDurationMs, trickplayFrame, webPlaybackProfile, webPlaybackProfileFor } from "./playback";
+import { captionSizeFlash, shortcutFlash, activeCaptionPreset, activeCueText, airPlayNoticeDurationMs, airPlayUnavailableMessage, captionFontSize, captionLineHeight, captionPrefsVersion, captionSizePreset, captionVerticalOffset, classifyStat, formatPlaybackStats, fullscreenStrategy, isPlaybackToggleKey, isResumable, mediaYearLabel, migrateCaptionDefaults, pauseCinemaDelays, pauseCinemaVisible, pauseSynopsisDurationSeconds, playbackStartPosition, playerKeyboardAction, playerTitleOwners, prefersViewportFullscreen, progressEvents, resumePosition, seekTime, shouldArmTitleTimer, shouldAutoPictureInPicture, shouldReportProgress, subtitleTrackLabel, titleDisplayDurationMs, trickplayFrame, webPlaybackProfile, webPlaybackProfileFor } from "./playback";
 
 describe("web playback capabilities", () => {
-  it("direct-plays browser-safe video and transcodes incompatible containers or audio to HLS", () => {
-    expect(webPlaybackProfile.DirectPlayProfiles).toContainEqual(expect.objectContaining({
-      Container: "mp4,m4v",
-      VideoCodec: "h264",
-      AudioCodec: "aac,mp3,ac3",
-    }));
-    expect(webPlaybackProfile.DirectPlayProfiles.some((profile) => profile.Container.includes("mkv"))).toBe(false);
+  it("never offers progressive direct play — every video flows as bounded HLS segments", () => {
+    // Direct play = the whole file as ONE unbounded request through the
+    // gateway's sync worker pool; paused/slept clients pinned workers until
+    // the pool starved (2026-07-26 outage). Segment streaming is the fix,
+    // not a preference.
+    expect(webPlaybackProfile.DirectPlayProfiles).toEqual([]);
     expect(webPlaybackProfile.TranscodingProfiles).toContainEqual(expect.objectContaining({
       Protocol: "hls",
       VideoCodec: "h264",
@@ -24,18 +23,13 @@ describe("web playback capabilities", () => {
     ]));
   });
 
-  it("offers HEVC direct play and fMP4 HLS stream-copy only when the browser reports support", () => {
-    expect(webPlaybackProfileFor(false).DirectPlayProfiles).toEqual(webPlaybackProfile.DirectPlayProfiles);
-    expect(webPlaybackProfileFor(true).DirectPlayProfiles).toContainEqual(expect.objectContaining({
-      Container: "mp4,m4v",
-      VideoCodec: "hevc,h265",
-      AudioCodec: expect.stringContaining("eac3"),
-    }));
-    expect(webPlaybackProfileFor(false).DirectPlayProfiles.some((profile) => profile.VideoCodec.includes("hevc"))).toBe(false);
-    expect(webPlaybackProfileFor(true).DirectPlayProfiles).toContainEqual(expect.objectContaining({
-      Container: "hls",
-      VideoCodec: "hevc,h264",
-    }));
+  it("offers fMP4 HLS stream-copy only when the browser reports HEVC support", () => {
+    expect(webPlaybackProfileFor(false).DirectPlayProfiles).toEqual([]);
+    // "hls" direct play is segment streaming (bounded) — the only direct
+    // container allowed; no progressive mp4/m4v profile may reappear.
+    expect(webPlaybackProfileFor(true).DirectPlayProfiles).toEqual([
+      expect.objectContaining({ Container: "hls", VideoCodec: "hevc,h264" }),
+    ]);
     expect(webPlaybackProfileFor(true).TranscodingProfiles).toContainEqual(expect.objectContaining({
       Container: "mp4",
       Protocol: "hls",
@@ -57,9 +51,10 @@ describe("player preferences", () => {
   });
 
   it("migrates only the previous subtitle defaults", () => {
-    expect(migrateCaptionDefaults({ fontSize: 75, lineHeight: 1.25, backgroundOpacity: .72, portraitOffset: 8 })).toEqual({ fontSize: 85, lineHeight: 1.52, backgroundOpacity: .5, portraitOffset: 12 });
-    expect(migrateCaptionDefaults({ version: 2, lineHeight: 1.45 })).toEqual({ version: 2, lineHeight: 1.52 });
-    expect(migrateCaptionDefaults({ version: 3, lineHeight: 1.53 })).toEqual({ version: 3, lineHeight: 1.52 });
+    expect(migrateCaptionDefaults({ fontSize: 75, lineHeight: 1.25, backgroundOpacity: .72, portraitOffset: 8 })).toEqual({ fontSize: 85, lineHeight: 1.49, backgroundOpacity: .5, portraitOffset: 12 });
+    expect(migrateCaptionDefaults({ version: 2, lineHeight: 1.45 })).toEqual({ version: 2, lineHeight: 1.49 });
+    expect(migrateCaptionDefaults({ version: 3, lineHeight: 1.53 })).toEqual({ version: 3, lineHeight: 1.49 });
+    expect(migrateCaptionDefaults({ version: 4, lineHeight: 1.52 })).toEqual({ version: 4, lineHeight: 1.49 });
     expect(migrateCaptionDefaults({ fontSize: 90, lineHeight: 1.4, backgroundOpacity: .4, portraitOffset: 18 })).toEqual({ fontSize: 90, lineHeight: 1.4, backgroundOpacity: .4, portraitOffset: 18 });
     expect(migrateCaptionDefaults({ version: captionPrefsVersion, fontSize: 75, lineHeight: 1.25, backgroundOpacity: .72, portraitOffset: 8 })).toEqual({ version: captionPrefsVersion, fontSize: 75, lineHeight: 1.25, backgroundOpacity: .72, portraitOffset: 8 });
   });
@@ -72,7 +67,7 @@ describe("player preferences", () => {
   });
 
   it("keeps subtitle line height between 1.45 and 2", () => {
-    expect(captionLineHeight(undefined)).toBe(1.52);
+    expect(captionLineHeight(undefined)).toBe(1.49);
     expect(captionLineHeight(1.2)).toBe(1.45);
     expect(captionLineHeight(1.7)).toBe(1.7);
     expect(captionLineHeight(2.2)).toBe(2);
@@ -302,5 +297,100 @@ describe("trickplay frames", () => {
 
   it("clamps past the final generated thumbnail", () => {
     expect(trickplayFrame(9999, info)).toMatchObject({ tile: 2, column: 4, row: 1 });
+  });
+});
+
+describe("caption size presets", () => {
+  it("maps preset names to font-size percentages", () => {
+    expect(captionSizePreset("small")).toBe(65);
+    expect(captionSizePreset("default")).toBe(85);
+    expect(captionSizePreset("large")).toBe(120);
+  });
+
+  it("falls back to the default size for an unknown preset", () => {
+    expect(captionSizePreset("gigantic")).toBe(85);
+  });
+
+  it("identifies which preset an exact font size belongs to", () => {
+    expect(activeCaptionPreset(65)).toBe("small");
+    expect(activeCaptionPreset(85)).toBe("default");
+    expect(activeCaptionPreset(120)).toBe("large");
+  });
+
+  it("returns null when the font size is a custom (non-preset) value", () => {
+    expect(activeCaptionPreset(92)).toBeNull();
+    expect(activeCaptionPreset(0)).toBeNull();
+  });
+});
+
+describe("stat severity classification", () => {
+  it("flags direct playback as good and transcoded playback as a warning", () => {
+    expect(classifyStat("Playback", "Direct")).toBe("good");
+    expect(classifyStat("Playback", "Transcode (HLS)")).toBe("warn");
+    expect(classifyStat("Playback", "Remux")).toBe("warn");
+  });
+
+  it("flags zero dropped frames as good and any drops as a warning", () => {
+    expect(classifyStat("Frames", "0 dropped / 143,220")).toBe("good");
+    expect(classifyStat("Frames", "12 dropped / 143,220")).toBe("warn");
+  });
+
+  it("treats descriptive stats as neutral", () => {
+    expect(classifyStat("Resolution", "1920 × 1080")).toBe("neutral");
+    expect(classifyStat("Video bitrate", "8.4 Mbps")).toBe("neutral");
+    expect(classifyStat("Speed", "1×")).toBe("neutral");
+  });
+});
+
+describe("shortcut flash", () => {
+  it("gives play and pause opposite glyphs so the new state is what is shown", () => {
+    // The flash reports the state the key produced, not the one it left.
+    expect(shortcutFlash("toggle", { paused: false })).toMatchObject({ icon: "play" });
+    expect(shortcutFlash("toggle", { paused: true })).toMatchObject({ icon: "pause" });
+  });
+
+  it("labels seeks with their step and direction", () => {
+    expect(shortcutFlash("seek-forward", {})).toMatchObject({ icon: "forward", label: "10s" });
+    expect(shortcutFlash("seek-back", {})).toMatchObject({ icon: "backward", label: "10s" });
+  });
+
+  it("moves exactly ten seconds and clamps at media boundaries", () => {
+    expect(seekTime(47.25, 10, 100)).toBe(57.25);
+    expect(seekTime(47.25, -10, 100)).toBe(37.25);
+    expect(seekTime(96, 10, 100)).toBe(100);
+    expect(seekTime(4, -10, 100)).toBe(0);
+  });
+
+  it("shows the resulting volume as a whole percentage", () => {
+    expect(shortcutFlash("volume-up", { volume: 0.55 })).toMatchObject({ icon: "volume", label: "55%" });
+    expect(shortcutFlash("volume-down", { volume: 0.05 })).toMatchObject({ icon: "volume-low", label: "5%" });
+    expect(shortcutFlash("volume-up", { volume: 1 })).toMatchObject({ label: "100%" });
+    // the player boosts past unity via a gain node -- don't clamp it to 100%
+    expect(shortcutFlash("volume-up", { volume: 1.5 })).toMatchObject({ label: "150%" });
+  });
+
+  it("uses the muted glyph at zero volume even when not explicitly muted", () => {
+    expect(shortcutFlash("volume-down", { volume: 0 })).toMatchObject({ icon: "volume-muted", label: "0%" });
+  });
+
+  it("reports mute state rather than the key that toggled it", () => {
+    expect(shortcutFlash("mute", { muted: true })).toMatchObject({ icon: "volume-muted", label: "Muted" });
+    // unmuting restores the level glyph for wherever the volume actually sits
+    expect(shortcutFlash("mute", { muted: false, volume: 0.4 })).toMatchObject({ icon: "volume-low", label: "40%" });
+    expect(shortcutFlash("mute", { muted: false, volume: 0.8 })).toMatchObject({ icon: "volume", label: "80%" });
+  });
+
+  it("reports whether captions ended up on or off", () => {
+    expect(shortcutFlash("captions", { captionsActive: true })).toMatchObject({ icon: "captions", label: "On" });
+    expect(shortcutFlash("captions", { captionsActive: false })).toMatchObject({ icon: "captions-off", label: "Off" });
+  });
+
+  it("skips actions whose result is already obvious on screen", () => {
+    // Fullscreen visibly resizes the viewport; a badge saying so is noise.
+    expect(shortcutFlash("fullscreen", {})).toBeNull();
+  });
+
+  it("shows caption size changes as a percentage", () => {
+    expect(captionSizeFlash(90)).toMatchObject({ icon: "captions", label: "90%" });
   });
 });
