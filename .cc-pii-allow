@@ -1,0 +1,4 @@
+# Jellyfin's user-authentication API route, which is not a macOS home directory.
+macos_user_path gateway/cloud_gateway/adapters.py
+# An example address in the shared-address range, not a host on the owner's tailnet.
+tailnet_ip packages/ui/src/theme.test.ts
