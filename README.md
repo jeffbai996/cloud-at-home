@@ -51,6 +51,8 @@ Browser -> Video ---------> Gateway -> Jellyfin
 
 ## Run locally
 
+Requires Node 22 (`>=22.12 <23`, from `package.json`) and Python 3.
+
 ```bash
 npm install
 python3 -m venv gateway/venv
@@ -64,15 +66,19 @@ npm run dev:photos
 
 ## Deployment
 
-Copy `deploy/.env.example` to the ignored runtime configuration, initialize the
-runtime directory, and start the stack:
+`deploy/init_runtime.py` creates the ignored runtime directory and, on first run,
+writes `deploy/runtime/.env` with a generated secret key and local upstream URLs.
+Edit that file to point at your Jellyfin and FileBrowser (`deploy/.env.example`
+lists the settings), then start the stack:
 
 ```bash
 gateway/venv/bin/python deploy/init_runtime.py
 docker compose -f deploy/compose.yaml up -d --build
 ```
 
-Rollback is `deploy/rollback.sh`; it stops only Cloud Files staging.
+`deploy/rollback.sh` runs `docker compose down`, which stops the whole stack
+(gateway, media, files and photos). Jellyfin and FileBrowser are separate and keep
+running.
 
 ## Public-source safety
 
