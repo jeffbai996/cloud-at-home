@@ -1,0 +1,229 @@
+export type Session = { user: { id: string; name: string }; csrf: string };
+export type Resource = {
+  name: string;
+  path?: string;
+  url?: string;
+  size: number;
+  isDir: boolean;
+  modified: string;
+  type?: string;
+  extension?: string;
+  items?: Resource[];
+  numDirs?: number;
+  numFiles?: number;
+};
+export type TrashEntry = {
+  id: string;
+  originalPath: string;
+  trashPath: string;
+  size: number;
+  deletedAt: string;
+  expiresAt: string;
+};
+export type StorageUsage = { total: number; used: number };
+export type StorageItem = { name: string; bytes: number; files: number; kind: "folder" | "file" };
+export type StorageCategory = {
+  id: string; name: string; color: string; browsePath: string; bytes: number; files: number; items: StorageItem[];
+};
+export type StorageVolume = {
+  id: string; name: string; available: boolean; readOnly: boolean;
+  total: number; used: number; free: number; other: number; categories: StorageCategory[];
+};
+export type StorageOverview = { volumes: StorageVolume[] };
+export type FolderSize = { path: string; bytes: number; files: number };
+
+let csrf = "";
+
+// App registers a handler here so a mid-session 401 (expired upstream token —
+// the gateway has already cleared our cookie) drops us straight to the login
+// view instead of leaving a wall of failed requests behind a stale UI.
+let onSessionLost: (() => void) | null = null;
+export function setSessionLostHandler(fn: () => void): void { onSessionLost = fn; }
+
+async function request(url: string, options: RequestInit = {}, expectJson = true) {
+  const headers = new Headers(options.headers);
+  if (csrf && options.method && options.method !== "GET") headers.set("X-CSRF-Token", csrf);
+  const response = await fetch(url, { ...options, headers, credentials: "include" });
+  if (!response.ok) {
+    // Not for the initial session probe — that 401 just means "show login".
+    if (response.status === 401 && !url.endsWith("/session")) onSessionLost?.();
+    const payload = await response.json().catch(() => ({ error: `${response.status} ${response.statusText}` }));
+    throw new Error(payload.error ?? "Request failed");
+  }
+  return expectJson ? response.json() : response;
+}
+
+function jsonRequest(url: string, options: RequestInit = {}, expectJson = true) {
+  const headers = new Headers(options.headers);
+  headers.set("Content-Type", "application/json");
+  return request(url, { ...options, headers }, expectJson);
+}
+
+export async function getSession(): Promise<Session | null> {
+  try {
+    const session = await request("/api/auth/files/session") as Session;
+    csrf = session.csrf;
+    return session;
+  } catch { return null; }
+}
+
+export async function login(username: string, password: string): Promise<Session> {
+  const session = await jsonRequest("/api/auth/files/login", { method: "POST", body: JSON.stringify({ username, password }) }) as Session;
+  csrf = session.csrf;
+  return session;
+}
+
+export async function logout(): Promise<void> {
+  await request("/api/auth/files/session", { method: "DELETE" });
+  csrf = "";
+}
+
+function encodedPath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+export function rawUrl(path: string, inline = true): string {
+  return `/api/files/proxy/raw${encodedPath(path)}${inline ? "?inline=true" : ""}`;
+}
+
+// Server-made JPEG previews (FileBrowser). The grid used to ship full-size
+// originals as thumbnails — slow, and HEIC never rendered at all.
+export function previewThumbUrl(path: string): string {
+  return `/api/files/proxy/preview/thumb${encodedPath(path)}`;
+}
+
+export function previewBigUrl(path: string): string {
+  return `/api/files/proxy/preview/big${encodedPath(path)}`;
+}
+
+export async function getResource(path: string, signal?: AbortSignal): Promise<Resource> {
+  return request(`/api/files/proxy/resources${encodedPath(path)}`, { signal }) as Promise<Resource>;
+}
+
+// FileBrowser search returns lean hits — a scope-relative path and a dir flag,
+// with no size or mtime — so results carry only what the row can honestly show.
+// The `dir`/`isDir` and `path`/`url` pairs differ across FileBrowser builds;
+// read both rather than betting on one shape.
+type SearchHit = { path?: string; url?: string; dir?: boolean; isDir?: boolean };
+
+export async function searchResources(scope: string, query: string, signal?: AbortSignal): Promise<Resource[]> {
+  const hits = await request(
+    `/api/files/proxy/search${encodedPath(scope)}?query=${encodeURIComponent(query)}`,
+    { signal },
+  ) as SearchHit[] | null;
+  if (!Array.isArray(hits)) return [];
+  const base = scope.endsWith("/") ? scope : `${scope}/`;
+  return hits.flatMap((hit) => {
+    const relative = (hit.path ?? hit.url ?? "").replace(/^\/+/, "");
+    if (!relative) return [];
+    const full = `${base}${relative}`.replace(/\/{2,}/g, "/");
+    const name = full.split("/").filter(Boolean).pop() ?? relative;
+    return [{ name, path: full, size: 0, isDir: hit.dir ?? hit.isDir ?? false, modified: "" }];
+  });
+}
+
+export async function getText(path: string): Promise<{ text: string; etag: string | null; modified: string | null }> {
+  const response = await request(rawUrl(path), {}, false) as Response;
+  return { text: await response.text(), etag: response.headers.get("ETag"), modified: response.headers.get("Last-Modified") };
+}
+
+export async function saveText(path: string, text: string, etag?: string | null): Promise<{ etag: string | null; modified: string | null }> {
+  const headers = new Headers();
+  headers.set("Content-Type", "text/plain; charset=utf-8");
+  if (etag) headers.set("If-Match", etag);
+  const response = await request(`/api/files/proxy/resources${encodedPath(path)}`, { method: "PUT", body: text, headers }, false) as Response;
+  return { etag: response.headers.get("ETag") ?? etag ?? null, modified: response.headers.get("Last-Modified") };
+}
+
+export async function createResource(path: string, directory: boolean): Promise<void> {
+  const target = `${encodedPath(path)}${directory ? "/" : ""}`;
+  await request(`/api/files/proxy/resources${target}?override=false`, { method: "POST", body: "" }, false);
+}
+
+export async function transformResource(from: string, to: string, copy: boolean): Promise<void> {
+  const query = new URLSearchParams({ action: copy ? "copy" : "rename", destination: to, override: "false", rename: "false" });
+  await request(`/api/files/proxy/resources${encodedPath(from)}?${query}`, { method: "PATCH" }, false);
+}
+
+export async function uploadFile(directory: string, file: File, onProgress?: (value: number) => void): Promise<void> {
+  const target = `${directory.replace(/\/$/, "")}/${file.name}`;
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/files/proxy/resources${encodedPath(target)}?override=false`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("X-CSRF-Token", csrf);
+    xhr.upload.onprogress = (event) => event.lengthComputable && onProgress?.(event.loaded / event.total);
+    xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(xhr.responseText || `Upload failed (${xhr.status})`));
+    xhr.onerror = () => reject(new Error("Upload connection failed"));
+    xhr.send(file);
+  });
+}
+
+export async function trash(path: string, size: number): Promise<void> {
+  await jsonRequest("/api/files/trash", { method: "POST", body: JSON.stringify({ path, size }) });
+}
+
+export async function listTrash(): Promise<TrashEntry[]> {
+  return request("/api/files/trash") as Promise<TrashEntry[]>;
+}
+
+export async function restoreTrash(id: string): Promise<{ restoredPath: string }> {
+  return request(`/api/files/trash/${id}/restore`, { method: "POST" }) as Promise<{ restoredPath: string }>;
+}
+
+export async function purgeTrash(id: string): Promise<void> {
+  await request(`/api/files/trash/${id}`, { method: "DELETE" });
+}
+
+export async function adminResource<T>(path: string, options: RequestInit = {}): Promise<T> {
+  return request(`/api/files/proxy/${path}`, options) as Promise<T>;
+}
+
+export async function createUser(username: string, password: string, admin: boolean): Promise<void> {
+  await jsonRequest("/api/files/proxy/users", {
+    method: "POST",
+    body: JSON.stringify({
+      username,
+      password,
+      scope: "/",
+      locale: "en",
+      viewMode: "mosaic",
+      singleClick: false,
+      perm: { admin, execute: false, create: true, rename: true, modify: true, delete: true, share: true, download: true },
+      commands: [],
+      lockPassword: false,
+      hideDotfiles: false,
+    }),
+  });
+}
+
+export async function deleteUser(id: number, currentPassword: string): Promise<void> {
+  await jsonRequest(`/api/files/proxy/users/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify({ current_password: currentPassword }),
+  }, false);
+}
+
+export async function getStorageUsage(): Promise<StorageUsage> {
+  return adminResource<StorageUsage>("usage");
+}
+
+export async function getStorageOverview(refresh = false): Promise<StorageOverview> {
+  return request(`/api/files/storage${refresh ? "?refresh=1" : ""}`) as Promise<StorageOverview>;
+}
+
+const folderSizeRequests = new Map<string, Promise<FolderSize>>();
+
+export function getFolderSize(path: string): Promise<FolderSize> {
+  const cached = folderSizeRequests.get(path);
+  if (cached) return cached;
+  const pending = request(`/api/files/folder-size?path=${encodeURIComponent(path)}`) as Promise<FolderSize>;
+  folderSizeRequests.set(path, pending);
+  void pending.then(
+    () => folderSizeRequests.delete(path),
+    () => folderSizeRequests.delete(path),
+  );
+  return pending;
+}
+
+export function currentCsrf(): string { return csrf; }
