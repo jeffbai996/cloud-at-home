@@ -1,8 +1,8 @@
-# Cloud at Home
+# cloud-at-home
 
 Movies, files and photos on a home server, behind one sign-in.
 
-![Cloud at Home](docs/images/cloud-at-home-hero-v2.jpeg)
+![cloud-at-home](docs/images/cloud-at-home-hero-v2.jpeg)
 
 Three React apps (Media, Files and Photos) share one shell and one sign-in. A small Python gateway sits in front of Jellyfin and FileBrowser, so the browser never sees an upstream credential, a filesystem path or an unauthenticated media URL. Most of the interesting work is in the browser's media pipeline: HEVC and surround sound decode differently across browsers, iOS takes over text tracks, and stream clocks drift.
 
