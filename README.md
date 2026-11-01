@@ -1,93 +1,45 @@
 # cloud-at-home
 
-Movies, files and photos on a home server, behind one sign-in.
+Movies, files and photos on a home server. A media player and a file manager, with a gateway between them and Jellyfin and FileBrowser.
 
-![cloud-at-home](docs/images/cloud-at-home-hero-v2.jpeg)
+![The media app's home page: a film title with Resume and Play from beginning buttons above a row of posters](docs/images/cloud-at-home-hero-v2.jpeg)
 
-Three React apps (Media, Files and Photos) share one shell and one sign-in. A small Python gateway sits in front of Jellyfin and FileBrowser, so the browser never sees an upstream credential, a filesystem path or an unauthenticated media URL. Most of the interesting work is in the browser's media pipeline: HEVC and surround sound decode differently across browsers, iOS takes over text tracks, and stream clocks drift.
+Most of the work went into the player. Browsers disagree about HEVC and surround sound, Apple's player takes over text tracks and fullscreen if you let it, and the stream's clock drifts every time you seek.
 
-## Highlights
+![The media app on demo titles: a film page with its rating and 4K HDR badges, and a Continue watching row](docs/images/cloud-media-demo.png)
 
-- Subtitles are timed against the decoded video frame (`requestVideoFrameCallback`), and a seek epoch stops a late frame from repainting a cue from before the seek.
-- Video and audio capability are probed separately, so a browser that plays HEVC but not E-AC-3 still gets the right stream. Direct playback is served in bounded 4 MiB ranges.
-- A dialogue mode routes the video element through a Web Audio compressor and gain stage, with a volume boost up to 200%.
-- Subtitle timing nudges are kept per session and published deliberately. Timing is keyed by a hash of the cue timestamps, so a translated track inherits the offset, and conflicting edits resolve with HTTP 409.
-- Files opens text and code in Monaco, waits until the language worker is actually ready before formatting, and saves with `ETag` / `If-Match`, so two tabs cannot overwrite each other.
-- The gateway keeps upstream tokens encrypted, checks a CSRF token on every state-changing request, and issues six-hour single-item tickets for native players such as AirPlay.
+![The files app on demo files: a grid of folders and documents with the details of one PDF open above it](docs/images/cloud-files-demo.png)
 
-## Screenshots
+The media app and the files app, on demo data.
 
-![Cloud Media](docs/images/cloud-media-demo.png)
-
-![Cloud Files](docs/images/cloud-files-demo.png)
-
-## Architecture
+## How it fits together
 
 ```mermaid
-flowchart TB
-  subgraph Clients["Browser Clients (React 19 + TypeScript + Vite)"]
-    UI["@cloud-at-home/ui Shell<br/>AppSwitcher, Theme Engine, Lightbox"]
-    MediaApp["Cloud Media SPA<br/>Adaptive HLS/MP4 Player & Catalog"]
-    FilesApp["Cloud Files SPA<br/>Drive Browser, Batch Pool & Monaco Editor"]
-    PhotosApp["Cloud Photos SPA<br/>Timeline, Albums & Non-Destructive Crop/Rotate"]
-  end
-
-  subgraph Edge["Edge & Identity"]
-    Nginx["Nginx Reverse Proxy<br/>CSP, Gzip & Unbuffered Stream Routing"]
-    Authentik["Authentik OIDC Provider<br/>Forward Auth & PostgreSQL 16 State"]
-  end
-
-  subgraph Gateway["Python Flask Security Gateway"]
-    Auth["Session & CSRF Guard<br/>HttpOnly Cookies + Sliding-Window Rate Limiter"]
-    Vault["TokenVault (Fernet AES-128-CBC + HMAC)<br/>SQLite WAL Session & Preference Store"]
-    MediaProxy["Media Proxy & StreamTicketStore<br/>4 MiB Range Cap + 6h Single-Item Tickets"]
-    SubStore["SubtitleTimingStore<br/>SHA-256 Cue Timing Keys & 409 Concurrency"]
-    FileProxy["ProxyPolicy & TrashStore<br/>Normalized Path Guard + 30-Day Trash Retention"]
-  end
-
-  subgraph Upstreams["Loopback Upstream Services"]
-    Jellyfin["Jellyfin Media Server<br/>HLS Remux/Transcode & Trickplay Sprites"]
-    FileBrowser["FileBrowser Daemon<br/>Scoped Read/Write & Read-Only Volumes"]
-  end
-
-  Clients --> Nginx
-  Nginx --> Authentik
-  Nginx --> Auth
-  Auth --> Vault
-  Auth --> MediaProxy
-  Auth --> SubStore
-  Auth --> FileProxy
-  MediaProxy --> Jellyfin
-  FileProxy --> FileBrowser
+flowchart LR
+    media["media app"] --> web["nginx"]
+    files["files app"] --> web
+    photos["photos app"] --> web
+    web --> gw["gateway"]
+    gw --> db[("sqlite")]
+    gw --> jf["Jellyfin"]
+    gw --> fb["FileBrowser"]
 ```
 
-All browser traffic enters through an Nginx edge proxy that sets strict Content Security Policy headers and disables request and response buffering on `/api/media/stream/` routes. The Python Flask gateway terminates application sessions using `HttpOnly`, `SameSite=Lax` cookies backed by SQLite in `WAL` mode; upstream Jellyfin and FileBrowser access tokens never reach the browser and are persisted only as Fernet ciphertext in the `sessions` table. Media playback requests either use short-lived, single-item stream tickets (6-hour TTL) for native HLS/AirPlay handoff or pass through a byte-range normalizer that caps every static read at 4 MiB. File and photo mutations pass through `ProxyPolicy`, which URL-decodes and normalizes relative path segments to block writes touching mounted read-only roots before forwarding requests to FileBrowser.
+Every app talks only to the gateway, a small Flask app in front of Jellyfin and FileBrowser. Nginx serves the apps, sets a strict content security policy, and turns off buffering on the stream route so video is passed on as it arrives.
 
-## Inside this repository
+The browser never holds a Jellyfin or FileBrowser token. The gateway keeps each one encrypted in SQLite and gives the browser an HttpOnly, same-site cookie and a CSRF token. Every request that changes something has to send the token back. Failed sign-ins are rate limited, and only a rejected password counts, so an upstream outage cannot lock anyone out. When an upstream token expires, the gateway clears the cookie and the app drops back to the sign-in screen.
 
-| Module | Lines | Responsibility |
-| --- | ---: | --- |
-| [`apps/media/src/Player.tsx`](apps/media/src/Player.tsx) | 2,065 | Adaptive HLS and bounded direct-play video player with `requestVideoFrameCallback` subtitle clock sync, Web Audio 200% boost and dynamics compressor, rAF-coalesced scrubbing with trickplay thumbnails, pause-cinema handoff, and live buffer telemetry. |
-| [`apps/media/src/playback.ts`](apps/media/src/playback.ts) | 872 | Playback domain logic: separate HEVC video vs. AC-3/E-AC-3 surround audio capability profiles, conservative WebVTT parser, decoded-frame vs. DOM clock domain selection, CJK/English subtitle stream curation, and sanitized diagnostic export. |
-| [`apps/media/src/subtitleTiming.ts`](apps/media/src/subtitleTiming.ts) | 156 | Stateful `SubtitleTimingController` managing live per-session subtitle timing nudges (`±0.1 s` / `±0.5 s`), SHA-256 content-key fallback, and optimistic-concurrency default publication with `409 Conflict` recovery. |
-| [`apps/media/src/mediaMetadata.ts`](apps/media/src/mediaMetadata.ts) | 189 | Catalog metadata normalization: co-production financing country deduplication with US-first pill ordering, CJK original-title script detection, logo-aware secondary title suppression, and IMDb/Tomatometer canonical link resolution. |
-| [`apps/media/src/rating.ts`](apps/media/src/rating.ts) | 107 | Multi-jurisdiction content classification engine mapping British Columbia Film Classification (`G`, `PG`, `14A`, `18A`, `R`, `A`), CBSC (`14+`, `18+`), MPA, and US TV Parental Guidelines into badge shapes and regulatory advisories without cross-country tier synthesis. |
-| [`apps/media/src/rollingTime.ts`](apps/media/src/rollingTime.ts) | 75 | Imperative DOM odometer renderer (`paintRollingTime`) that reconciles right-aligned place-value digit cells across duration length transitions (`0:59` to `1:00:00`) outside React reconciliation. |
-| [`apps/files/src/Editor.tsx`](apps/files/src/Editor.tsx) | 189 | Document viewer and Monaco code editor with a TypeScript/JavaScript Web Worker syntactic-diagnostics readiness probe, `ETag`/`If-Match` concurrency control, and `sanitize-html` + `marked` Markdown/HTML preview. |
-| [`apps/files/src/file-utils.ts`](apps/files/src/file-utils.ts) | 196 | Filesystem and batch utilities: path-traversal-safe path joiner, virtual-collection mutation destination builder, bounded-concurrency batch worker pool (`BATCH_CONCURRENCY = 4`), and file-size editor mode tiering. |
-| [`apps/files/src/api.ts`](apps/files/src/api.ts) | 229 | Typed Cloud Files HTTP client with automatic `X-CSRF-Token` injection on state-changing methods, mid-session `401` interception, `ETag`/`If-Match` text save protocol, `XMLHttpRequest` upload progress streaming, and in-flight folder-size request deduplication. |
-| [`packages/ui/src/lightbox.tsx`](packages/ui/src/lightbox.tsx) | 122 | Portal-mounted media lightbox shared across Cloud Files and Cloud Photos with cyclic modulo navigation and a ref-backed single-registration `keydown` listener that avoids mid-dispatch listener teardown. |
+A video stream needs a ticket for that one title. A ticket lasts six hours, and the gateway refuses a stream without a valid one.
 
-This repository contains selected source modules from a private production codebase and is not runnable as a standalone application.
+Files and Photos are two views of the same folder, and Files can link into Photos. A small shared package holds the theme, the modal, the lightbox and the switcher that moves between the apps. The apps are TypeScript and React 19, built with Vite, and the gateway and the web containers run under Docker Compose. This repository holds selected modules from a private codebase and is not runnable on its own. The gateway, the Nginx config and the Photos app are not part of it.
 
-## How it works
+## The media player
 
-### 1. Decoded-frame subtitle synchronization and seek-epoch fencing
+**Subtitles are drawn by the app.** Registering a text track on the video would hand subtitles to the browser, and on Apple devices to AVKit. So the player fetches plain WebVTT from the gateway, parses the cues itself and draws them over the video.
 
-Registering native `<track>` elements on an HTML5 `<video>` node hands subtitle rendering to the browser's media engine (and to AVKit on iOS/macOS), which overrides custom typography and breaks live timing adjustments. Cloud Media instead fetches normalized WebVTT from the gateway, parses cues into plain intervals, and drives cue lookup from `requestVideoFrameCallback`. Because native MPEG-TS HLS streams can expose a raw transport PCR offset in `metadata.mediaTime`, `subtitleFrameTime` compares the first owned frame against `video.currentTime` within a `0.5 s` window to lock onto either the decoded-frame clock or the DOM clock, while `subtitleClockEpochRef` discards callbacks queued prior to a seek:
+Where the browser allows it, the cue is looked up from the timestamp of the frame on screen, not from `currentTime`. Native HLS can report a transport offset in that timestamp, so the player compares the two on the first frame and keeps whichever clock agrees. A counter ticks on every seek, and a callback queued before the seek is dropped. An old frame cannot put an old cue back on screen ([`apps/media/src/playback.ts`](apps/media/src/playback.ts)):
 
 ```ts
-// apps/media/src/playback.ts
 export function subtitleFrameTime(currentTime: number, mediaTime: number, clock: "detect" | "decoded" | "dom" = "detect"): number {
   if (!Number.isFinite(mediaTime)) return currentTime;
   if (!Number.isFinite(currentTime)) return mediaTime;
@@ -95,80 +47,54 @@ export function subtitleFrameTime(currentTime: number, mediaTime: number, clock:
   if (clock === "dom") return currentTime;
   return Math.abs(mediaTime - currentTime) <= .5 ? mediaTime : currentTime;
 }
-
-// apps/media/src/Player.tsx
-const syncSubtitleCue = useCallback((mediaTime?: number, clockSource: "DOM currentTime" | "Decoded frame timestamp" = "DOM currentTime", clockEpoch = subtitleClockEpochRef.current) => {
-  if (clockEpoch !== subtitleClockEpochRef.current || mediaSeekingRef.current || seekingRef.current) return;
-  const seconds = mediaTime ?? videoRef.current?.currentTime ?? positionRef.current;
-  subtitleClockRef.current = { seconds, source: clockSource };
-  const nextCue = mediaCueTextAt(subtitleCuesRef.current, seconds - subtitleDelayRef.current);
-  if (nextCue === cueRef.current) return;
-  cueRef.current = nextCue;
-  setCue(nextCue);
-}, []);
 ```
 
-### 2. Decoupled HEVC and surround-audio capability probing
+**Subtitles can be nudged.** The subtitle files are usually right to within a tenth of a second. What drifts is the stream. A seek restarts the transcode at the nearest keyframe, while the playlist still labels segments on an even six-second grid. The gap between what you hear and what the timeline says changes with where you seeked. So the nudge is a per-viewing control, in steps of 0.1 s or 0.5 s, and it stays with that player session.
 
-Jellyfin interprets `AudioCodec` in a `DeviceProfile` as a strict preference order when transcoding unsupported audio tracks such as DTS. Advertising `"eac3,ac3,aac"` whenever a browser supports HEVC (`hvc1`) video causes Jellyfin to transcode DTS into AC-3 on desktop browsers that decode HEVC in hardware but lack Dolby audio decoders, stalling playback with `MEDIA_ERR_DECODE`. `webPlaybackProfileFor` probes AC-3 and E-AC-3 independently of HEVC and separates 6-second keyframe-aligned stream-copy HLS segments from 1-second re-encoded HLS segments:
+A Save timing button turns the current offset into the title's default for everyone, and only the owner can press it. If someone else saved first, the gateway answers 409 and the player loads their value instead of overwriting it. The default is keyed by a hash of the cue start and end times, not the text, so a translated track with the same cues inherits it ([`apps/media/src/subtitleTiming.ts`](apps/media/src/subtitleTiming.ts)).
+
+**Audio is probed separately from video.** Jellyfin reads the list of audio codecs in a device profile as a preference order. Offer surround audio to every browser that decodes HEVC, and a title whose audio needs re-encoding can come back as AC-3, which the browser may not be able to decode. The player then sits paused with a decode error. So AC-3 and E-AC-3 are checked on their own, and AAC always comes last as the fallback:
 
 ```ts
-// apps/media/src/playback.ts
 export function audioCodecPreference(audio: AudioCapabilities): string {
   const surround = [audio.eac3 ? "eac3" : "", audio.ac3 ? "ac3" : ""].filter(Boolean);
   return [...surround, "aac"].join(",");
 }
-
-export function webPlaybackProfileFor(supportsHevc: boolean, audio: AudioCapabilities = {}, acceleratedTranscode = false) {
-  if (!supportsHevc) {
-    if (!acceleratedTranscode) return webPlaybackProfile;
-    return {
-      ...webPlaybackProfile,
-      Name: "Cloud Media Web Transcode",
-      TranscodingProfiles: webPlaybackProfile.TranscodingProfiles.map((profile) => ({
-        ...profile,
-        SegmentLength: 1,
-        BreakOnNonKeyFrames: true,
-      })),
-    };
-  }
-  const audioCodecs = audioCodecPreference(audio);
-  const hasSurround = audioCodecs !== "aac";
 ```
 
-### 3. Monaco Web Worker readiness probing and ETag-guarded saves
+**Segment sizes follow the source.** Stream copy can only cut on the source's keyframes, so it uses six-second segments. A real transcode can cut every second. Advertise one second for stream copy and Jellyfin counts seeks in one-second segments while the video is cut every six, so one segment number can mean two different positions. The gateway caps every static read at 4 MiB, open-ended ranges included, and direct play of a compatible MP4 is only turned on with that cap.
 
-In `@monaco-editor/react`, the editor instance mounts and registers the `editor.action.formatDocument` action before the background TypeScript/JavaScript Web Worker finishes initializing its language service, causing early format invocations to silently no-op. `FileViewer` polls `getSyntacticDiagnostics` on the active model URI every `250 ms` (up to `60 s`) before enabling the Format button, and pairs saves with `ETag`/`If-Match` headers so concurrent modifications surface as HTTP `412 Precondition Failed` instead of overwriting newer file state:
+**The rest of the player.** Volume goes up to 200%. Above 100% the sound passes through a gain stage and a compressor, and the boost has to be switched on by a click each session so the browser does not suspend the audio silently. Scrubbing shows thumbnails from Jellyfin's trickplay sprites. Intros, recaps and credits get a skip button. The stats panel copies as diagnostics, with URLs and tokens redacted. The play clock is an odometer, painted by hand outside React so the two do not fight over the digits.
 
-```tsx
-// apps/files/src/Editor.tsx
-const waitForWorker = async () => {
-  const getWorker = language === "typescript"
-    ? monaco.languages.typescript.getTypeScriptWorker
-    : monaco.languages.typescript.getJavaScriptWorker;
-  const deadline = Date.now() + 60_000;
-  while (!cancelled && Date.now() < deadline) {
-    try {
-      const worker = await getWorker();
-      const client = await worker(model.uri);
-      await client.getSyntacticDiagnostics(model.uri.toString());
-      if (!cancelled) setFormatterReady(true);
-      return;
-    } catch {
-      await new Promise((resolve) => window.setTimeout(resolve, 250));
-    }
-  }
-};
-```
+**Metadata keeps its sources apart.** A rating badge comes from its own authority: British Columbia film classification, Canadian TV, the MPA or US TV. A Canadian rating is never turned into an MPA one. TMDB lists the countries that financed a film, not where it is from, so the US goes first when it is involved.
 
-## Stack
+## The file manager
 
-| Layer | Technologies |
-| --- | --- |
-| Front-End Applications | React 19, TypeScript 5.8, Vite 6, Motion (`motion/react`), Radix UI (`@radix-ui/react-dropdown-menu`), Lucide icons, `hls.js` (lazy-loaded on browsers without native HLS), `@monaco-editor/react`, `marked`, `sanitize-html` |
-| Security Gateway | Python 3, Flask, SQLite 3 (`WAL` mode), `cryptography` (Fernet symmetric encryption), `requests` |
-| Edge & Upstream Infrastructure | Nginx, Authentik OIDC (PostgreSQL 16), Jellyfin, FileBrowser, Docker Compose, systemd |
+Text and code open in Monaco. A file up to 5 MiB can be edited, up to 50 MiB it is read-only, and anything larger is download only. Markdown and HTML are sanitized before they preview, and the HTML preview runs in a sandboxed iframe.
+
+**Formatting waits for the language worker.** Monaco loads its TypeScript and JavaScript service late, and a format request before that does nothing and says nothing. The Format button stays disabled until a round trip to the worker succeeds. It retries every 250 ms and gives up after a minute, then enables the button anyway so it never stays dead ([`apps/files/src/Editor.tsx`](apps/files/src/Editor.tsx)).
+
+**Saves send the ETag back.** The editor sends it in `If-Match`. When the server answers 412, the editor says the file changed and to reopen it before saving.
+
+**Batch actions finish what they can.** Copy, move and trash run four at a time. Every item is tried, and the summary says which ones failed. Paths are checked before they go out, so `..` and null bytes are rejected, and a move destination is built from the source's own name. Deleted files go to a trash for 30 days and can be restored. One folder, the media drive, is read-only, and the gateway refuses writes into or out of it. It decodes the path and resolves `..` first, so a crafted path cannot walk around the check.
+
+**The lightbox keeps one key listener.** It reads its callbacks through refs. Swapping a listener in the middle of a key event makes the browser drop that event, and Escape stopped closing the viewer. It is also mounted on the page body, so the top bar cannot paint over its buttons ([`packages/ui/src/lightbox.tsx`](packages/ui/src/lightbox.tsx)).
+
+## What's in this repository
+
+| File | What it does |
+| :--- | :--- |
+| [`apps/media/src/Player.tsx`](apps/media/src/Player.tsx) | The video player and its settings |
+| [`apps/media/src/playback.ts`](apps/media/src/playback.ts) | Device profiles, subtitle parsing and clocks, stats |
+| [`apps/media/src/subtitleTiming.ts`](apps/media/src/subtitleTiming.ts) | Subtitle nudges and the saved default |
+| [`apps/media/src/mediaMetadata.ts`](apps/media/src/mediaMetadata.ts) | Countries, titles and series years |
+| [`apps/media/src/rating.ts`](apps/media/src/rating.ts) | Rating badges |
+| [`apps/media/src/rollingTime.ts`](apps/media/src/rollingTime.ts) | The odometer clock |
+| [`apps/files/src/Editor.tsx`](apps/files/src/Editor.tsx) | File viewer and Monaco editor |
+| [`apps/files/src/file-utils.ts`](apps/files/src/file-utils.ts) | Paths, file types and batch actions |
+| [`apps/files/src/api.ts`](apps/files/src/api.ts) | The gateway client |
+| [`packages/ui/src/lightbox.tsx`](packages/ui/src/lightbox.tsx) | The shared lightbox |
 
 ## License
 
-Source code is proprietary.
+The source is proprietary.
